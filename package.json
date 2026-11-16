@@ -1,0 +1,71 @@
+{
+  "name": "neurogym-back",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API REST de NeuroGym: plataforma SaaS B2B multiempresa y multisede para la gestión de gimnasios.",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force",
+    "etl": "tsx src/jobs/ejecutar-etl.ts",
+    "supresion": "tsx src/jobs/supresion-datos.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "test:preparar": "tsx tests/preparar-base.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "neurogym",
+    "saas",
+    "gimnasios",
+    "express",
+    "prisma"
+  ],
+  "author": "Agustina De Yuliis",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "@prisma/client": "^6.19.3",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mercadopago": "^2.9.0",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.18.12",
+    "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^3.2.4",
+    "prisma": "^6.19.3",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

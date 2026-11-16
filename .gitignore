@@ -1,0 +1,20 @@
+# Dependencias y compilados
+node_modules/
+dist/
+coverage/
+
+# Variables de entorno con secretos (solo se versiona .env.example)
+.env
+.env.*
+!.env.example
+
+# Archivos subidos en desarrollo (almacenamiento local)
+uploads/
+
+# Volcados de bases de datos y temporales
+*.sql.gz
+*.dump
+*.backup
+*.log
+.DS_Store
+Thumbs.db
