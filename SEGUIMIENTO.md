@@ -4,46 +4,48 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ## Estado actual (2026-11-16)
 
-### Implementado (backend, compila con `tsc --noEmit`)
+### Repositorios
 
-| Módulo | Contenido | Verificado |
+| Repositorio | URL (privado) | Commits |
 |---|---|---|
-| Base de datos | `prisma/schema.prisma` con las 50 tablas del diccionario (10.5.8) + `auditoria`; SQL complementario de restricciones preparado | `prisma validate` OK. **Migraciones sin ejecutar** (falta acceso a PostgreSQL) |
-| Seguridad | JWT, bcrypt, acceso público y administrativo separados, contexto recalculado por solicitud (bajas lógicas al instante), límite de intentos | Unitarias del Composite |
-| Patrón Composite | `src/patterns/composite` + `middlewares/permisos.middleware.ts` | 6 pruebas unitarias |
-| Administración | Gimnasio/políticas, sedes (RD2, RD21), personal y roles (RF15), planes y precios con historial (RF20, RD12), socios (RF16, RD20) | Pendiente integración |
-| Turnos | Configuración de turnos y series (RD23), reservas con bloqueo de fila y disparador de cupo | Pendiente integración |
-| Asistencia QR (CU-004) | QR firmado (RNF7), reserva/sede/horario/duplicado, cuota impaga con autorizar/bloquear, manual y provisoria (RD14), día de constancia (RD9) | 6 pruebas de CU-004-003 |
-| Cuotas y pagos (CU-001) | Facade `CuotaService` + Strategy (pago único, débito 10 %, efectivo), webhook idempotente, simulador, comprobante y WhatsApp | 9 pruebas de Strategy |
-| Entrenamiento (CU-003) | Preferencias, rutina con IA (Claude o simulación), edición, variantes, entrenamientos | Validación de rutina |
-| Equipamiento | Inventario, baja definitiva (RD22), incidencias con archivos, agrupación, mantenimientos, alertas (RF23), aviso RF34 | Pendiente integración |
-| Retención (CU-002) | ETL (`ProcesoETLAsistencia`), señales, propuestas con aprobación (RD10), bonificación Premium, Intelligence, exportación xlsx | Reglas de señal y riesgo |
-| Marketplace | Registro de profesionales, perfil, servicios, disponibilidad, métodos de pago, turnos con Observer, comisiones (RD13), .ics | Observer y RD16 |
-| Supresión de datos | `npm run supresion` (Ley 25.326, apartado 9.4) | Pendiente |
+| NeuroGym-back | https://github.com/DeYuliisAgustina/NeuroGym-back | 17 (más este registro) |
+| NeuroGym-front | https://github.com/DeYuliisAgustina/NeuroGym-front | 9 |
 
-### Frontend (NeuroGym-front)
+### Base de datos
 
-Pantallas de los tres perfiles conectadas a la API: sitio público, ingresos separados, registro de profesionales; socio (bienvenida de 3 pasos, rutina, turnos, QR dinámico, cuotas y pagos con comprobante, simulador de Mercado Pago, beneficios, equipamiento e incidencias, marketplace, perfil); personal (panel, recepción QR con cámara, socios, cobros, horarios, sedes, equipamiento, retención, Intelligence con gráficos, precios, usuarios y roles, políticas); profesional (agenda y perfil). Compila (`tsc` y `vite build`) con carga diferida por pantalla.
+- PostgreSQL 18 local, rol `neurogym`; bases `neurogym_dev` (desarrollo, con seed) y `neurogym_test` (pruebas, se vacía en cada ejecución).
+- Migraciones aplicadas: `20261116120000_modelo_inicial` (51 tablas, 28 tipos ENUM) y `20261116120100_restricciones_integridad` (55 CHECK, 4 disparadores, 4 índices parciales). `prisma migrate diff` contra la base: sin diferencias.
+- Seed: 2 gimnasios (Intelligence y Standard), 3 sedes, 36 socios, 621 turnos, 821 asistencias con QR, 108 cuotas, 48 equipos, 3 profesionales; ETL ejecutado.
 
-### Pruebas ejecutadas
+### Módulos implementados y verificación
 
-- Backend `npm run test:unit`: **54 pruebas, todas aprobadas** (2026-11-16).
-- Frontend `npm test`: **14 pruebas, todas aprobadas** (2026-11-16).
-- Backend `tests/integration/` (5 archivos: seguridad y multiempresa, turnos y asistencia, cuotas y pagos, entrenamiento y retención, marketplace): **escritas y compilan; sin ejecutar** hasta tener PostgreSQL.
+| Módulo | Verificado con |
+|---|---|
+| Seguridad (JWT, bcrypt, accesos separados, Composite, aislamiento multiempresa, auditoría) | `tests/integration/seguridad.test.ts` (12) + `tests/unit/composite.test.ts` (6) |
+| Turnos y reservas (cupos concurrentes, RD18, RD21, RD23 con disparador) | `turnos-asistencia.test.ts` |
+| Asistencia QR (CU-004: QR firmado y vencido, reserva/sede/horario, duplicado, cuota impaga con autorizar/bloquear, manual y provisoria, día de constancia) | `turnos-asistencia.test.ts` (13 en total) + `reglas.test.ts` |
+| Cuotas y pagos (CU-001: Facade, Strategy, webhook idempotente, rechazo, falla de WhatsApp, débito con 10 %, efectivo, RD12) | `cuotas-pagos.test.ts` (11) + `strategy.test.ts` (9) |
+| Entrenamiento (CU-003: rutina simulada, reemplazo, edición, variante, entrenamiento) y equipamiento (RD22) | `entrenamiento-retencion.test.ts` |
+| Retención (CU-002: ETL, señales, estimaciones solo Intelligence, propuesta con aprobación y bonificación Premium, xlsx, canjes) | `entrenamiento-retencion.test.ts` (10 en total) + `reglas.test.ts` |
+| Marketplace (Observer CREADO/REPROGRAMADO/CANCELADO, RD16, comisión 8 %, Fundadores, .ics) | `marketplace.test.ts` (8) + `observer.test.ts` (5) |
+| Frontend | `npm test` (14) y prueba manual en el navegador: sitio público, ingreso del socio, bienvenida y rutina, pago con el simulador hasta el comprobante, ingreso administrativo, Intelligence, retención, recepción, cobros, equipamiento, usuarios y horarios sin errores de consola |
 
-### Migraciones
+### Pruebas ejecutadas (2026-11-16)
 
-- `20261116120000_modelo_inicial` (51 tablas, 28 tipos ENUM, generada con `prisma migrate diff`).
-- `20261116120100_restricciones_integridad` (CHECK, índices parciales y disparadores).
-- **Sin aplicar todavía.**
+- Backend `npm test`: **108 pruebas aprobadas** (54 unitarias + 54 de integración con PostgreSQL). Cobertura de líneas 71 %; patrones entre 89 % y 100 %.
+- Frontend `npm test`: **14 pruebas aprobadas**. `vite build` correcto (249 kB de JavaScript inicial).
+
+### Errores detectados y corregidos
+
+- Las cuotas vencidas no pasaban a IMPAGA si el servidor no estaba encendido a la hora de la tarea diaria: se agregó `ponerAlDia()` al iniciar (con `CRON_ENABLED=true`) y en el seed.
+- pgAdmin ejecuta el editor en una transacción y `CREATE DATABASE` no se admite: el script de rol quedó solo con `CREATE ROLE`; las bases las crea el rol `neurogym`.
 
 ### Pendiente
 
-1. Crear el rol y la base `neurogym_dev` (script `../crear_usuario_neurogym.sql`, a ejecutar en pgAdmin) y la base `neurogym_test`.
-2. Aplicar las migraciones, ejecutar el seed y las pruebas de integración; corregir lo que falle.
-3. Probar el frontend contra la API (flujos principales en el navegador).
-4. Inicializar los repositorios Git, configurar la identidad y publicar en GitHub (falta completar `gh auth login`).
-5. Credenciales de prueba de Mercado Pago, WhatsApp y Claude para verificar las integraciones reales.
+1. Credenciales de prueba de Mercado Pago (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` y una URL pública para el webhook), WhatsApp Cloud API y Claude (`ANTHROPIC_API_KEY`) para verificar las integraciones reales; hoy funcionan sus simulaciones.
+2. Almacenamiento de objetos en un proveedor S3 compatible (hoy, carpeta local).
+3. Actualizar el monto de las preaprobaciones de débito cuando cambia un precio.
+4. Apartado 10.5.10 del TFI (casos de prueba) a partir de las funciones reales: `verificarReservaVigente`, `CuotaService.registrarResultado`, `detectarSenal`/`estimarRiesgo`, `validarRutinaGenerada`.
 
 ### Decisiones y diferencias con el TFI (para revisar con la autora)
 
@@ -56,3 +58,4 @@ Pantallas de los tres perfiles conectadas a la API: sitio público, ingresos sep
 - **Mensajería a profesionales:** el modelo no guarda su teléfono; reciben las notificaciones en la plataforma.
 - **GESTION incluye CONSULTA** en la evaluación de permisos.
 - **Vencimiento de cuotas:** día 10 (`CUOTA_DIA_VENCIMIENTO`), no definido en el TFI.
+- **Alta de socios:** el gimnasio entrega una contraseña temporal que el socio puede cambiar (el TFI no define el mecanismo de primer acceso).
