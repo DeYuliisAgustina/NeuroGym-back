@@ -175,12 +175,45 @@ export class CuotaService {
   // Resultados informados por Mercado Pago (CU-001-006 y CU-001-007)
   // ------------------------------------------------------------------
 
-  /** Webhook: verifica la firma, consulta el recurso y registra el resultado. */
+  /** Modo de la integración con Mercado Pago (PRUEBA, NO_CONFIGURADO o doble de prueba). */
+  get modoIntegracion() {
+    return this.gateway.modo;
+  }
+
+  /** Webhook: verifica la firma, consulta el recurso en la API oficial y registra el resultado. */
   async procesarWebhook(notificacion: NotificacionEntrante) {
     if (!this.gateway.validarWebhook(notificacion)) throw new ErrorApp(401, 'FIRMA_INVALIDA', 'Notificación no autenticada');
-    const resultado = await this.gateway.interpretarNotificacion(notificacion);
+    let resultado: ResultadoOperacion | null;
+    try {
+      resultado = await this.gateway.interpretarNotificacion(notificacion);
+    } catch (error) {
+      // Recurso inexistente (por ejemplo, la notificación de ejemplo del panel): se confirma sin reintentos.
+      if ((error as { status?: number }).status === 404) return { procesado: false, motivo: 'RECURSO_INEXISTENTE' };
+      throw error;
+    }
     if (!resultado) return { procesado: false };
     return this.registrarResultado(resultado);
+  }
+
+  /**
+   * Retorno desde Checkout Pro: con el payment_id que devuelve Mercado Pago se
+   * consulta el pago en la API oficial (no se confía en los parámetros de la URL)
+   * y se registra por el mismo camino idempotente que el webhook.
+   */
+  async confirmarRetornoPago(paymentId: string, socioId: number) {
+    const resultado = await this.gateway.consultarPago(paymentId);
+    if (!resultado || resultado.tipo !== 'PAGO') return { procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' };
+    const pago = await prisma.pago.findUnique({ where: { id: resultado.pagoId }, include: { cuota: true } });
+    if (!pago || pago.cuota.socioId !== socioId) throw noEncontrado('Pago');
+    return { ...(await this.registrarResultado(resultado)), aprobado: resultado.aprobado };
+  }
+
+  /** Retorno desde la autorización del débito automático (preapproval_id). */
+  async confirmarRetornoAdhesion(idPreaprobacion: string, socioId: number) {
+    const resultado = await this.gateway.consultarPreaprobacion(idPreaprobacion);
+    if (!resultado || resultado.tipo !== 'ADHESION') return { procesado: false };
+    if (resultado.socioId !== socioId) throw noEncontrado('Adhesión');
+    return { ...(await this.registrarResultado(resultado)), autorizada: resultado.autorizada };
   }
 
   /**

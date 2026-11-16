@@ -1,6 +1,8 @@
 /**
  * Puerto de integración con Mercado Pago (RNF9): solo cuotas de socios.
  * NeuroGym no custodia fondos; la confirmación siempre la informa Mercado Pago.
+ * En este proyecto la integración opera exclusivamente en el entorno de
+ * PRUEBA de Mercado Pago Developers (sin dinero real).
  */
 
 export interface SolicitudPago {
@@ -17,7 +19,7 @@ export interface SolicitudDebito {
   emailPagador: string;
 }
 
-/** Resultado normalizado de una notificación (webhook o simulador). */
+/** Resultado normalizado de una notificación o consulta a Mercado Pago. */
 export type ResultadoOperacion =
   | { tipo: 'PAGO'; pagoId: number; referenciaExterna: string; aprobado: boolean }
   | { tipo: 'ADHESION'; socioId: number; idPreaprobacion: string; autorizada: boolean }
@@ -29,9 +31,12 @@ export interface NotificacionEntrante {
   cuerpo: unknown;
 }
 
+/** Estado de la integración, para mostrarlo al iniciar y en la defensa. */
+export type ModoIntegracion = 'PRUEBA' | 'NO_CONFIGURADO' | 'DOBLE_DE_PRUEBA';
+
 export interface MercadoPagoGateway {
-  readonly simulado: boolean;
-  /** Crea la preferencia de pago único y devuelve la URL de pago. */
+  readonly modo: ModoIntegracion;
+  /** Crea la preferencia de Checkout Pro y devuelve la URL de pago. */
   crearPago(solicitud: SolicitudPago): Promise<string>;
   /** Crea la preaprobación del débito automático y devuelve la URL de autorización. */
   crearDebito(solicitud: SolicitudDebito): Promise<string>;
@@ -41,4 +46,8 @@ export interface MercadoPagoGateway {
   validarWebhook(notificacion: NotificacionEntrante): boolean;
   /** Consulta a Mercado Pago el recurso notificado y normaliza su resultado. */
   interpretarNotificacion(notificacion: NotificacionEntrante): Promise<ResultadoOperacion | null>;
+  /** Consulta un pago por su id (retorno del checkout o conciliación manual). */
+  consultarPago(paymentId: string): Promise<ResultadoOperacion | null>;
+  /** Consulta una preaprobación por su id (retorno de la autorización del débito). */
+  consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null>;
 }

@@ -1,13 +1,10 @@
 import type { Request, Response } from 'express';
-import { env } from '../config/env';
-import { prisma } from '../config/prisma';
 import { cuotaService } from '../patterns/facade';
 import { cobranzaService } from '../services/cobranza.service';
 import { personalDe, socioDe } from '../utils/contexto';
-import { ErrorApp, noEncontrado } from '../utils/errores';
 import { aFechaDb } from '../utils/fechas';
 import { idParam, validar } from '../utils/validar';
-import { filtroCuotasSchema, filtroPagosSchema, medioPagoSchema, simulacionSchema } from '../validations/operacion.validation';
+import { filtroCuotasSchema, filtroPagosSchema, medioPagoSchema, retornoMercadoPagoSchema } from '../validations/operacion.validation';
 import { periodoSchema } from '../validations/comunes.validation';
 
 /**
@@ -73,27 +70,18 @@ export const cuotaController = {
   },
 
   /**
-   * SIMULADOR (solo sin credenciales de Mercado Pago): permite completar en
-   * desarrollo el mismo flujo de confirmación que produce un webhook real.
+   * Retorno desde Mercado Pago (Checkout Pro o autorización del débito): el
+   * resultado se confirma consultando la API oficial, nunca con la URL.
    */
-  async simular(req: Request, res: Response) {
-    if (!env.mercadoPago.simulado || env.nodeEnv === 'production') throw new ErrorApp(404, 'NO_DISPONIBLE', 'Simulador deshabilitado');
-    const datos = validar(simulacionSchema, req.body);
-    const usuario = req.usuario!;
-    const referencia = `SIM-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    if (datos.tipo === 'PAGO') {
-      const pago = await prisma.pago.findFirst({ where: { id: datos.pagoId, cuota: { socioId: usuario.socioId } } });
-      if (!pago) throw noEncontrado('Pago');
-      return res.json(await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: pago.id, referenciaExterna: referencia, aprobado: datos.aprobar }));
-    }
-    if (datos.socioId !== usuario.socioId) throw noEncontrado('Socio');
-    if (datos.tipo === 'ADHESION') {
-      return res.json(
-        await cuotaService.registrarResultado({ tipo: 'ADHESION', socioId: datos.socioId, idPreaprobacion: `SIM-PRE-${referencia}`, autorizada: datos.aprobar }),
-      );
-    }
-    const adhesion = await prisma.adhesionDebito.findFirst({ where: { socioId: datos.socioId, estado: 'ACTIVA' } });
-    if (!adhesion) throw noEncontrado('Adhesión activa');
-    res.json(await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: adhesion.idPreaprobacion, referenciaExterna: referencia, aprobado: datos.aprobar }));
+  async confirmarRetorno(req: Request, res: Response) {
+    const datos = validar(retornoMercadoPagoSchema, req.body);
+    const { socioId } = socioDe(req);
+    if (datos.paymentId) return res.json(await cuotaService.confirmarRetornoPago(datos.paymentId, socioId));
+    res.json(await cuotaService.confirmarRetornoAdhesion(datos.preapprovalId!, socioId));
+  },
+
+  /** Estado de la integración, visible en la defensa (sin datos sensibles). */
+  async estadoIntegracion(_req: Request, res: Response) {
+    res.json({ mercadoPago: cuotaService.modoIntegracion });
   },
 };

@@ -13,7 +13,8 @@ operacionRoutes.post('/cuotas/:id/pagos', autenticar, soloPerfiles('SOCIO'), cuo
 
 // Mercado Pago: el webhook es público y se autentica por firma (x-signature).
 operacionRoutes.post('/pagos/webhook', cuotaController.webhook);
-operacionRoutes.post('/pagos/simulador', autenticar, soloPerfiles('SOCIO'), cuotaController.simular);
+operacionRoutes.post('/pagos/confirmacion', autenticar, soloPerfiles('SOCIO'), cuotaController.confirmarRetorno);
+operacionRoutes.get('/pagos/integracion', cuotaController.estadoIntegracion);
 
 // CU-004: recepción QR del personal autorizado
 const recepcion = [autenticar, soloPerfiles('PERSONAL'), permiso('RECEPCION', 'CONSULTA')];

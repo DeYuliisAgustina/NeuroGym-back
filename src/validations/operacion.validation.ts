@@ -30,8 +30,10 @@ export const filtroCuotasSchema = z.object({
   periodo: periodoSchema.optional(),
   busqueda: z.string().trim().max(100).optional(),
 });
-export const simulacionSchema = z.discriminatedUnion('tipo', [
-  z.object({ tipo: z.literal('PAGO'), pagoId: idSchema, aprobar: z.boolean() }),
-  z.object({ tipo: z.literal('ADHESION'), socioId: idSchema, aprobar: z.boolean() }),
-  z.object({ tipo: z.literal('DEBITO'), socioId: idSchema, aprobar: z.boolean() }),
-]);
+/** Parámetros con los que Mercado Pago regresa al frontend (payment_id o preapproval_id). */
+export const retornoMercadoPagoSchema = z
+  .object({
+    paymentId: z.string().regex(/^\d{1,20}$/).optional(),
+    preapprovalId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/).optional(),
+  })
+  .refine((d) => Boolean(d.paymentId) !== Boolean(d.preapprovalId), 'Indicá paymentId o preapprovalId');

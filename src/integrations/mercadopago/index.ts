@@ -1,11 +1,11 @@
 import { env } from '../../config/env';
 import { MercadoPagoApiGateway } from './MercadoPagoApiGateway';
 import type { MercadoPagoGateway } from './MercadoPagoGateway';
-import { MercadoPagoSimulado } from './MercadoPagoSimulado';
+import { MercadoPagoNoConfigurado } from './MercadoPagoNoConfigurado';
 
 export type * from './MercadoPagoGateway';
-export { MercadoPagoApiGateway, MercadoPagoSimulado };
+export { MercadoPagoApiGateway, MercadoPagoNoConfigurado };
 
-/** Integración real si hay credenciales; simulación explícita en caso contrario. */
+/** API oficial (entorno de prueba) si hay credenciales; si no, la integración queda deshabilitada. */
 export const crearGatewayMercadoPago = (): MercadoPagoGateway =>
-  env.mercadoPago.simulado ? new MercadoPagoSimulado() : new MercadoPagoApiGateway();
+  env.mercadoPago.accessToken ? new MercadoPagoApiGateway() : new MercadoPagoNoConfigurado();

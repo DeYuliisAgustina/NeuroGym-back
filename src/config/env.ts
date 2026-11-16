@@ -29,12 +29,16 @@ export const env = {
   puntosPorDia: Number(process.env.PUNTOS_POR_DIA ?? 10),
   cronHabilitado: process.env.CRON_ENABLED === 'true',
 
+  // Solo credenciales de PRUEBA de Mercado Pago Developers (la integración rechaza las productivas).
   mercadoPago: {
     accessToken: process.env.MP_ACCESS_TOKEN ?? '',
     webhookSecret: process.env.MP_WEBHOOK_SECRET ?? '',
-    // Sin token de acceso se usa el simulador local (nunca cobra dinero real).
-    get simulado() {
-      return !this.accessToken;
+    // Correo de la cuenta compradora de prueba: pagador obligatorio de las suscripciones en prueba.
+    emailPagadorPrueba: process.env.MP_TEST_PAYER_EMAIL ?? '',
+    // URL HTTPS pública del frontend (túnel de desarrollo) para los retornos de Mercado Pago.
+    urlRetornoPublica: process.env.MP_PUBLIC_FRONTEND_URL ?? '',
+    get configurado() {
+      return Boolean(this.accessToken);
     },
   },
   mensajeria: {

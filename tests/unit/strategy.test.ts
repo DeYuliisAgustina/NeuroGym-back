@@ -1,10 +1,10 @@
-import { MercadoPagoSimulado } from '../../src/integrations/mercadopago';
+import { MercadoPagoDobleDePrueba } from '../mocks/MercadoPagoDobleDePrueba';
 import { CobroDebitoAutomatico, CobroEfectivo, CobroPagoUnico, crearEstrategiasCobro } from '../../src/patterns/strategy';
 
 const precios = { cuotaBase: 32000, adicionalPremium: 12000 };
 
 describe('Patrón Strategy: modalidades de cobro', () => {
-  const gateway = new MercadoPagoSimulado();
+  const gateway = new MercadoPagoDobleDePrueba();
 
   it('pago único: importe completo, sin descuento (RD6)', () => {
     const c = new CobroPagoUnico(gateway).calcularImporte(precios);
@@ -57,6 +57,6 @@ describe('Patrón Strategy: modalidades de cobro', () => {
       { tx: {} as never, socio: { id: 5, email: 'x@demo', nombre: 'X' }, adhesionActivaId: null },
     );
     expect(r.tipo).toBe('REDIRECCION');
-    if (r.tipo === 'REDIRECCION') expect(r.url).toContain('tipo=ADHESION');
+    if (r.tipo === 'REDIRECCION') expect(r.url).toContain('/debito/5');
   });
 });

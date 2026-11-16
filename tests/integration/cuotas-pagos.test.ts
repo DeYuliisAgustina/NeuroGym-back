@@ -4,8 +4,18 @@ import { MensajeriaSimulada, servicioMensajeria } from '../../src/integrations/m
 import { cuotaService } from '../../src/patterns/facade';
 import { ahoraLocal } from '../../src/utils/fechas';
 import { app, catalogo, conToken, crearGimnasio, crearPersonal, crearRol, crearSocio, limpiarBase } from './fixtures';
+import type { MercadoPagoDobleDePrueba } from '../mocks/MercadoPagoDobleDePrueba';
 
 const mensajeria = servicioMensajeria as MensajeriaSimulada;
+
+// Doble de prueba de Mercado Pago inyectado SOLO en esta suite (la aplicación usa la API oficial de prueba).
+const { doble } = vi.hoisted(() => ({ doble: { actual: null as unknown as MercadoPagoDobleDePrueba } }));
+vi.mock('../../src/integrations/mercadopago', async (original) => {
+  const modulo = await original<typeof import('../../src/integrations/mercadopago')>();
+  const { MercadoPagoDobleDePrueba: Doble } = await import('../mocks/MercadoPagoDobleDePrueba');
+  doble.actual = new Doble();
+  return { ...modulo, crearGatewayMercadoPago: () => doble.actual };
+});
 
 describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
   let g: Awaited<ReturnType<typeof crearGimnasio>>;
@@ -136,8 +146,34 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
   });
 
   it('el webhook sin firma válida se rechaza', async () => {
+    doble.actual.firmaValida = false;
     const r = await request(app).post('/api/pagos/webhook').send({ type: 'payment', data: { id: '1' } });
     expect(r.status).toBe(401);
+  });
+
+  it('webhook firmado: consulta el pago, lo registra y es idempotente ante reenvíos', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
+    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    doble.actual.firmaValida = true;
+    doble.actual.respuestas.set('9001', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: '9001', aprobado: true });
+    const notificacion = { type: 'payment', action: 'payment.updated', data: { id: '9001' } };
+    expect((await request(app).post('/api/pagos/webhook').query({ 'data.id': '9001', type: 'payment' }).send(notificacion)).body.procesado).toBe(true);
+    expect((await request(app).post('/api/pagos/webhook').query({ 'data.id': '9001', type: 'payment' }).send(notificacion)).body.duplicado).toBe(true);
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
+    expect(await prisma.pago.count({ where: { referenciaExterna: '9001' } })).toBe(1);
+  });
+
+  it('retorno de Checkout Pro: confirma consultando el pago y no acepta pagos ajenos', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    const otro = await crearSocio(g.sedeA.id);
+    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
+    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    doble.actual.respuestas.set('9002', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: '9002', aprobado: true });
+    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(otro.token)).send({ paymentId: '9002' })).status).toBe(404);
+    const r = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ paymentId: '9002' });
+    expect(r.body).toMatchObject({ procesado: true, aprobado: true });
+    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ paymentId: 'abc' })).status).toBe(400);
   });
 
   it('la cuota del período se genera al dar de alta al socio', async () => {

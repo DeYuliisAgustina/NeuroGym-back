@@ -9,7 +9,7 @@ async function iniciar() {
   app.listen(env.puerto, () => {
     console.log(`NeuroGym API escuchando en http://localhost:${env.puerto}`);
     console.log(
-      `Integraciones → Mercado Pago: ${env.mercadoPago.simulado ? 'SIMULADA' : 'real'} · ` +
+      `Integraciones → Mercado Pago: ${env.mercadoPago.configurado ? 'API oficial (entorno de PRUEBA)' : 'NO CONFIGURADO'} · ` +
         `WhatsApp: ${env.mensajeria.simulado ? 'SIMULADA' : 'real'} · IA: ${env.ia.simulado ? 'SIMULADA' : env.ia.modelo}`,
     );
   });
