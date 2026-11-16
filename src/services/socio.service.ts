@@ -1,0 +1,186 @@
+import type { Prisma, TipoPlanSocio } from '@prisma/client';
+import { prisma } from '../config/prisma';
+import { generarPasswordTemporal } from '../utils/credenciales';
+import { conflicto, reglaNegocio } from '../utils/errores';
+import { ahoraLocal } from '../utils/fechas';
+import { registrarAuditoria } from './auditoria.service';
+import { hashPassword } from './auth.service';
+import { generarCuotaSocio } from './cuotaGeneracion.service';
+import { verificarCupoSocios } from './gimnasio.service';
+import { bonificacionVigente, preciosParaSocio } from './precios.service';
+import { tenant } from './tenant.service';
+
+interface DatosSocio {
+  email: string;
+  nombre: string;
+  apellido: string;
+  telefono: string;
+  sedeId: number;
+  plan: TipoPlanSocio;
+  consentimientoDatos: boolean;
+}
+
+const seleccionUsuario = { select: { id: true, email: true, nombre: true, apellido: true, activo: true, fechaAlta: true } };
+
+async function planDelGimnasio(gimnasioId: number, tipo: TipoPlanSocio) {
+  return prisma.planSocio.findUniqueOrThrow({ where: { gimnasioId_tipo: { gimnasioId, tipo } } });
+}
+
+/** ABM de socios con baja lógica (RF16, RD20) y autogestión del plan (RF12). */
+export const socioService = {
+  listar(gimnasioId: number, filtros: { sedeId?: number; plan?: TipoPlanSocio; activo?: boolean; busqueda?: string }) {
+    const where: Prisma.SocioWhereInput = {
+      sede: { gimnasioId },
+      ...(filtros.sedeId ? { sedeId: filtros.sedeId } : {}),
+      ...(filtros.plan ? { plan: { tipo: filtros.plan } } : {}),
+      usuario: {
+        ...(filtros.activo !== undefined ? { activo: filtros.activo } : {}),
+        ...(filtros.busqueda
+          ? {
+              OR: [
+                { nombre: { contains: filtros.busqueda, mode: 'insensitive' } },
+                { apellido: { contains: filtros.busqueda, mode: 'insensitive' } },
+                { email: { contains: filtros.busqueda, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+    };
+    return prisma.socio.findMany({
+      where,
+      include: { usuario: seleccionUsuario, plan: true, sede: { select: { id: true, nombre: true } } },
+      orderBy: { usuario: { apellido: 'asc' } },
+    });
+  },
+
+  async obtener(socioId: number, gimnasioId: number) {
+    const socio = await tenant.socio(socioId, gimnasioId);
+    const [cuotas, reservas, bonificacion] = await Promise.all([
+      prisma.cuota.findMany({ where: { socioId }, orderBy: { periodo: 'desc' }, take: 12, include: { pagos: { include: { comprobante: true } } } }),
+      prisma.reserva.findMany({
+        where: { socioId },
+        orderBy: { fechaReserva: 'desc' },
+        take: 20,
+        include: { turno: { include: { sede: { select: { nombre: true } } } }, asistencia: true },
+      }),
+      bonificacionVigente(socioId),
+    ]);
+    const { passwordHash: _omitido, ...usuario } = socio.usuario;
+    return { ...socio, usuario, cuotas, reservas, bonificacionVigente: bonificacion };
+  },
+
+  async crear(gimnasioId: number, usuarioId: number, datos: DatosSocio) {
+    // Datos obligatorios del TFI: consentimiento para el tratamiento de datos (RNF2).
+    if (!datos.consentimientoDatos) throw reglaNegocio('SIN_CONSENTIMIENTO', 'Se requiere el consentimiento para el tratamiento de datos');
+    const sede = await tenant.sede(datos.sedeId, gimnasioId);
+    if (!sede.habilitada) throw reglaNegocio('SEDE_DESHABILITADA', 'La sede está deshabilitada y no admite nuevos socios (RD21)');
+    if (await prisma.usuario.findUnique({ where: { email: datos.email } })) throw conflicto('EMAIL_EN_USO', 'El correo ya está registrado');
+    await verificarCupoSocios(gimnasioId);
+    const plan = await planDelGimnasio(gimnasioId, datos.plan);
+    const passwordTemporal = generarPasswordTemporal();
+
+    const socio = await prisma.$transaction(async (tx) => {
+      const creado = await tx.socio.create({
+        data: {
+          sede: { connect: { id: datos.sedeId } },
+          plan: { connect: { id: plan.id } },
+          telefono: datos.telefono,
+          consentimientoDatos: true,
+          usuario: {
+            create: {
+              email: datos.email,
+              nombre: datos.nombre,
+              apellido: datos.apellido,
+              tipo: 'SOCIO' as const,
+              passwordHash: await hashPassword(passwordTemporal),
+            },
+          },
+        },
+        include: { usuario: seleccionUsuario, plan: true, sede: true },
+      });
+      // El socio nace con la cuota del período en curso.
+      await generarCuotaSocio(creado.id, ahoraLocal().fecha.slice(0, 7), tx);
+      await registrarAuditoria({ gimnasioId, usuarioId, accion: 'ALTA_SOCIO', entidad: 'socio', entidadId: creado.id }, tx);
+      return creado;
+    });
+    return { socio, passwordTemporal };
+  },
+
+  async actualizar(
+    socioId: number,
+    gimnasioId: number,
+    usuarioId: number,
+    datos: Partial<Pick<DatosSocio, 'nombre' | 'apellido' | 'telefono' | 'sedeId' | 'plan'>>,
+  ) {
+    const socio = await tenant.socio(socioId, gimnasioId);
+    if (datos.sedeId && datos.sedeId !== socio.sedeId) {
+      const sede = await tenant.sede(datos.sedeId, gimnasioId);
+      if (!sede.habilitada) throw reglaNegocio('SEDE_DESHABILITADA', 'La sede está deshabilitada (RD21)');
+    }
+    const plan = datos.plan ? await planDelGimnasio(gimnasioId, datos.plan) : null;
+    await prisma.$transaction([
+      prisma.usuario.update({ where: { id: socio.usuarioId }, data: { nombre: datos.nombre, apellido: datos.apellido } }),
+      prisma.socio.update({ where: { id: socioId }, data: { telefono: datos.telefono, sedeId: datos.sedeId, planSocioId: plan?.id } }),
+    ]);
+    if (plan && plan.id !== socio.planSocioId) await recalcularCuotaPendiente(socioId);
+    await registrarAuditoria({ gimnasioId, usuarioId, accion: 'MODIFICAR_SOCIO', entidad: 'socio', entidadId: socioId, detalle: datos });
+    return this.obtener(socioId, gimnasioId);
+  },
+
+  /** RD20: baja lógica y reversible. Conserva cuotas, pagos, turnos y asistencias. */
+  async cambiarEstado(socioId: number, gimnasioId: number, usuarioId: number, activo: boolean) {
+    const socio = await tenant.socio(socioId, gimnasioId);
+    if (socio.usuario.activo === activo) return;
+    if (activo) await verificarCupoSocios(gimnasioId);
+    await prisma.usuario.update({ where: { id: socio.usuarioId }, data: { activo } });
+    await registrarAuditoria({ gimnasioId, usuarioId, accion: activo ? 'REACTIVAR_SOCIO' : 'DESACTIVAR_SOCIO', entidad: 'socio', entidadId: socioId });
+  },
+
+  // ---------------- Autogestión del socio ----------------
+
+  async perfil(socioId: number) {
+    const socio = await prisma.socio.findUniqueOrThrow({
+      where: { id: socioId },
+      include: { usuario: seleccionUsuario, plan: true, sede: true, preferencia: true },
+    });
+    const bonificacion = await bonificacionVigente(socioId);
+    return { ...socio, esPremium: socio.plan.tipo === 'PREMIUM' || bonificacion !== null, bonificacionVigente: bonificacion };
+  },
+
+  async actualizarPerfil(socioId: number, datos: { telefono: string }) {
+    await prisma.socio.update({ where: { id: socioId }, data: { telefono: datos.telefono } });
+    return this.perfil(socioId);
+  },
+
+  /** RF12: contratar o dar de baja el Plan Premium. */
+  async cambiarPlan(socioId: number, gimnasioId: number, usuarioId: number, tipo: TipoPlanSocio) {
+    const plan = await planDelGimnasio(gimnasioId, tipo);
+    const socio = await prisma.socio.findUniqueOrThrow({ where: { id: socioId } });
+    if (socio.planSocioId === plan.id) throw reglaNegocio('PLAN_SIN_CAMBIOS', `Ya tenés el Plan ${tipo === 'PREMIUM' ? 'Premium' : 'Básico'}`);
+    await prisma.socio.update({ where: { id: socioId }, data: { planSocioId: plan.id } });
+    await recalcularCuotaPendiente(socioId);
+    await registrarAuditoria({ gimnasioId, usuarioId, accion: tipo === 'PREMIUM' ? 'ALTA_PREMIUM' : 'BAJA_PREMIUM', entidad: 'socio', entidadId: socioId });
+    return this.perfil(socioId);
+  },
+};
+
+/**
+ * Al cambiar de plan se actualiza la composición de la cuota del período si
+ * todavía no tiene pagos aprobados; las cuotas pagadas no se modifican (RD12).
+ */
+async function recalcularCuotaPendiente(socioId: number) {
+  const periodo = ahoraLocal().fecha.slice(0, 7);
+  const cuota = await prisma.cuota.findUnique({
+    where: { socioId_periodo: { socioId, periodo } },
+    include: { pagos: { where: { estado: 'APROBADO' } } },
+  });
+  if (!cuota || cuota.estado === 'PAGADA' || cuota.pagos.length > 0) return;
+  const precios = await preciosParaSocio(socioId);
+  const descuentoPct = Number(cuota.descuento) > 0 ? 0.1 : 0;
+  const total = precios.cuotaBase + precios.adicionalPremium;
+  const descuento = Math.round(total * descuentoPct * 100) / 100;
+  await prisma.cuota.update({
+    where: { id: cuota.id },
+    data: { ...precios, descuento, importeFinal: Math.round((total - descuento) * 100) / 100 },
+  });
+}
