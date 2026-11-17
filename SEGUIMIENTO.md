@@ -356,7 +356,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - El PDF solo se puede enviar mientras haya una URL HTTPS pública que WhatsApp pueda descargar (túnel en desarrollo). Al cerrar el túnel se vacía `WHATSAPP_URL_PUBLICA`.
 - El enlace vence a los 15 minutos. WhatsApp lo descarga al enviar y después el archivo queda en la conversación.
 - Cada documento cuenta para el límite de 25 mensajes de la clave del sandbox.
-- **Descarga unificada (pedido de la autora, 2026-11-17):** el botón «Descargar comprobante» ahora baja **el mismo PDF** que se envía por WhatsApp. Las rutas son `GET /api/socio/pagos/{id}/comprobante.pdf` (socio titular) y `GET /api/admin/pagos/{id}/comprobante.pdf` (personal con permiso COBROS, consulta), con el mismo control de acceso que el comprobante. Reemplaza al archivo HTML anterior. Verificado contra el backend en ejecución: socio4 descarga `comprobante-NG-00000077.pdf`; otro socio recibe 404 y sin sesión, 401. Pruebas automáticas: backend 166 y frontend 24.
+- **Descarga unificada (pedido de la autora, 2026-11-17):** el botón «Descargar comprobante» ahora baja **el mismo PDF** que se envía por WhatsApp. Las rutas son `GET /api/socio/pagos/{id}/comprobante.pdf` (socio titular) y `GET /api/admin/pagos/{id}/comprobante.pdf` (personal con permiso COBROS, consulta), con el mismo control de acceso que el comprobante. Reemplaza al archivo HTML anterior. Verificado contra el backend en ejecución: socio4 descarga `comprobante-NG-00000077.pdf`; otro socio recibe 404 y sin sesión, 401. Pruebas automáticas: backend 166 y frontend 24. **Confirmado por la autora en el navegador:** como `socio4` descargó `comprobante-NG-00000078.pdf` desde «Cuotas y pagos».
 
 ### Pendiente
 
