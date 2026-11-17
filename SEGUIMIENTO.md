@@ -349,6 +349,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
   - Antes y después: 70 pagos y 67 comprobantes; el comprobante NG-00000077 y su cuota quedaron idénticos.
 - **Pago nuevo:** el personal registró en efectivo la cuota 2026-11 de `socio4` (pago #78). Se generó el comprobante NG-00000078 y se envió automáticamente `comprobante-NG-00000078.pdf`: `ACEPTADO` → `LEIDO`. La cuota quedó `PAGADA`.
 - **Seguridad:** el enlace sin firma respondió 401 a través del túnel.
+- **Confirmación de la autora:** los dos PDF (NG-00000077 y NG-00000078) llegaron como archivo adjunto a su WhatsApp y se abren correctamente.
 - **Pruebas automáticas:** backend 166 (PDF, enlace firmado válido, alterado y vencido, documento en 360dialog, envío sin URL pública).
 
 **Limitaciones:**
