@@ -32,7 +32,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **161 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación) y las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos y modo de prueba).
+- Backend `npm test`: **166 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación) y las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado).
 - Frontend `npm test`: **23 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
@@ -312,6 +312,50 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - No documenta el estado `failed`: un fallo se ve en la respuesta de la API (401, 403 o 429).
 - Recibir los estados requiere una URL HTTPS pública (túnel temporal en desarrollo).
 - Para producción con socios reales, WhatsApp exige un número propio verificado y cobra por mensaje (plantillas fuera de la ventana de 24 h), con un método de pago. Eso queda fuera del alcance académico definido.
+
+### Comprobante completo en PDF por WhatsApp (2026-11-17)
+
+**Pedido de la autora:** que el socio reciba automáticamente en WhatsApp el **comprobante completo como PDF adjunto**, con el mismo diseño del comprobante de la aplicación (logo, «Pago registrado», período, socio, plan, importe, desglose, medio, fecha y número NG), generado con los datos históricos del pago. Sin botones ni datos de seguimiento, y sin reemplazar el archivo por un texto.
+
+**Generación del PDF** (`src/services/comprobantePdf.service.ts`):
+- **Herramientas:** `pdfkit` 0.20.2 (licencia MIT) y la fuente Inter de la interfaz (`@fontsource/inter` 5.3.0, licencia OFL). Ambas son gratuitas y de código abierto, y no requieren navegador.
+- **Diseño:** reproduce la tarjeta del comprobante de la aplicación:
+  - borde punteado y fondo `#fbfcf8`;
+  - logo oficial (`src/assets/logo-neurogym.jpg`, copiado del frontend);
+  - insignia «Pago registrado», «Cuota {período}» y «{socio} · Plan {plan}»;
+  - importe grande y filas de «Cuota del gimnasio · Básico», «Adicional Premium» (si corresponde), descuento del 10 % en verde (débito), medio, fecha y referencia;
+  - la nota «Comprobante NG-… · Sede …. No reemplaza una factura.»
+- **Formato:** mismos formatos que la interfaz (pesos es-AR, «Octubre 2026», «17 de noviembre de 2026»). Página de ancho A5 con el alto ajustado al contenido. El texto es seleccionable, no una imagen.
+- **Datos:** salen del comprobante registrado: la composición conservada en la cuota (RD12) y el importe del pago, nunca de los precios actuales.
+
+**Envío como adjunto:**
+- **Formato del mensaje:** `document` con `link` HTTPS, `filename` y `caption`; el texto acompaña al archivo. Es el mismo formato para 360dialog y para Meta.
+- **El sandbox de 360dialog lo admite:** su documentación solo prohíbe subir y recuperar archivos por media ID y no menciona los documentos por enlace, así que se verificó en la práctica: aceptó el documento y WhatsApp lo entregó como archivo adjunto.
+- **Enlace protegido, no permanente ni público:**
+  - `GET /api/whatsapp/comprobantes/{envío}.pdf?vence=…&firma=…`;
+  - firma HMAC-SHA256 derivada del secreto del servidor, vigente **15 minutos**;
+  - responde 401 sin firma o con la firma alterada, y 410 si venció;
+  - identifica el envío, no el pago ni el socio;
+  - el PDF se genera al momento: no se guarda ningún archivo;
+  - encabezados `Cache-Control: no-store, private` y `X-Robots-Tag: noindex`.
+- **URL pública:** la base es `WHATSAPP_URL_PUBLICA` (el túnel HTTPS en desarrollo). Sin ella, el comprobante **no se envía** y queda `FALLIDO` con el motivo: nunca se reemplaza por solo texto.
+- **Registro:** la columna nueva `envio_mensaje.adjunto` guarda el nombre del archivo enviado (migración `20261117210000_envio_mensaje_adjunto`, solo agrega una columna).
+- **Flujo:** pago confirmado → comprobante → PDF → envío automático → estados por webhook. Es el mismo camino idempotente de siempre: un evento repetido no genera otro mensaje.
+
+**Pruebas reales** (sandbox de 360dialog, túnel Pinggy temporal, cerrado al terminar):
+- **NG-00000077, sin registrar ningún pago:**
+  - El primer intento quedó `OMITIDO`, porque `socio4` no estaba habilitado en `WHATSAPP_SOCIOS_PRUEBA`: la protección de pruebas funcionó.
+  - Habilitado solo para esa ejecución: `ACEPTADO` → `ENVIADO` → `ENTREGADO`, con el adjunto `comprobante-NG-00000077.pdf`.
+  - Antes y después: 70 pagos y 67 comprobantes; el comprobante NG-00000077 y su cuota quedaron idénticos.
+- **Pago nuevo:** el personal registró en efectivo la cuota 2026-11 de `socio4` (pago #78). Se generó el comprobante NG-00000078 y se envió automáticamente `comprobante-NG-00000078.pdf`: `ACEPTADO` → `LEIDO`. La cuota quedó `PAGADA`.
+- **Seguridad:** el enlace sin firma respondió 401 a través del túnel.
+- **Pruebas automáticas:** backend 166 (PDF, enlace firmado válido, alterado y vencido, documento en 360dialog, envío sin URL pública).
+
+**Limitaciones:**
+- El PDF solo se puede enviar mientras haya una URL HTTPS pública que WhatsApp pueda descargar (túnel en desarrollo). Al cerrar el túnel se vacía `WHATSAPP_URL_PUBLICA`.
+- El enlace vence a los 15 minutos. WhatsApp lo descarga al enviar y después el archivo queda en la conversación.
+- Cada documento cuenta para el límite de 25 mensajes de la clave del sandbox.
+- El botón «Descargar comprobante» de la aplicación sigue generando el archivo HTML de antes. No se cambió porque no fue pedido.
 
 ### Pendiente
 

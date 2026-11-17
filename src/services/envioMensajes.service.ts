@@ -2,6 +2,7 @@ import { Prisma, type EnvioMensaje, type EstadoEnvioMensaje, type TipoEnvioMensa
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
 import { servicioMensajeria, type EstadoInformado, type ServicioMensajeria } from '../integrations/mensajeria';
+import { enlaceComprobante } from './enlaceComprobante';
 
 export interface SolicitudEnvio {
   tipo: TipoEnvioMensaje;
@@ -15,6 +16,8 @@ export interface SolicitudEnvio {
   /** Tipo de la notificación de historial (canal MENSAJERIA) que se registra al aceptarse. */
   tipoNotificacion?: TipoNotificacion;
   eventoTurnoId?: number;
+  /** Archivo adjunto (PDF del comprobante); el texto va como caption y no lo reemplaza. */
+  documento?: { nombreArchivo: string };
 }
 
 /** Orden de avance de los estados que informa el proveedor (un estado no retrocede). */
@@ -68,6 +71,7 @@ export function crearServicioEnvios(mensajeria: ServicioMensajeria) {
             referencia: s.referencia,
             proveedor: mensajeria.proveedor,
             texto: s.texto,
+            adjunto: s.documento?.nombreArchivo ?? null,
             comprobanteId: s.comprobanteId,
             cuotaId: s.cuotaId,
           },
@@ -83,7 +87,26 @@ export function crearServicioEnvios(mensajeria: ServicioMensajeria) {
       const omision = await motivoOmision(s.usuarioId);
       if (omision) return prisma.envioMensaje.update({ where: { id: envio.id }, data: { estado: 'OMITIDO', detalle: omision } });
 
-      const r = await mensajeria.enviar(s.telefono, s.texto);
+      let r;
+      if (s.documento) {
+        // El PDF viaja por un enlace HTTPS firmado y de corta duración; sin URL pública
+        // no se envía (y nunca se reemplaza el archivo por un mensaje de solo texto).
+        const base = env.mensajeria.urlPublica;
+        if (!mensajeria.simulado && !base.startsWith('https://')) {
+          return prisma.envioMensaje.update({
+            where: { id: envio.id },
+            data: {
+              estado: 'FALLIDO',
+              detalle: 'Falta WHATSAPP_URL_PUBLICA (URL HTTPS pública) para que WhatsApp descargue el PDF: no se envió el comprobante',
+              fechaFallido: new Date(),
+            },
+          });
+        }
+        const url = enlaceComprobante(base || 'https://simulado.invalid', envio.id);
+        r = await mensajeria.enviarDocumento(s.telefono, { url, nombreArchivo: s.documento.nombreArchivo, texto: s.texto });
+      } else {
+        r = await mensajeria.enviar(s.telefono, s.texto);
+      }
       if (!r.aceptado) {
         return prisma.envioMensaje.update({
           where: { id: envio.id },

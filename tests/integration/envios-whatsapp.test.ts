@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import request from 'supertest';
 import { env } from '../../src/config/env';
 import { prisma } from '../../src/config/prisma';
-import type { ResultadoEnvio, ServicioMensajeria } from '../../src/integrations/mensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from '../../src/integrations/mensajeria';
 import { CuotaService } from '../../src/patterns/facade/CuotaService';
 import { crearServicioEnvios } from '../../src/services/envioMensajes.service';
 import { marcarCuotasVencidas } from '../../src/services/cuotaGeneracion.service';
@@ -23,6 +23,11 @@ class ProveedorQueAcepta implements ServicioMensajeria {
     if (this.rechazar) return { aceptado: false, error: '360dialog HTTP 429: se agotaron los 25 mensajes' };
     return { aceptado: true, idMensaje: `wamid.TEST.${crypto.randomUUID()}`, destino: '5490000000000' };
   }
+  readonly documentos: DocumentoAdjunto[] = [];
+  async enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
+    this.documentos.push(documento);
+    return this.enviar(telefono, documento.texto);
+  }
 }
 
 const webhook = (statuses: object[]) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { statuses } }] }] });
@@ -30,7 +35,7 @@ const ts = (desfase = 0) => String(Math.floor(Date.now() / 1000) + desfase);
 
 describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
   let g: Awaited<ReturnType<typeof crearGimnasio>>;
-  const claves = ['destinoPrueba', 'webhookToken', 'metaAppSecret', 'metaVerifyToken', 'sociosPrueba'] as const;
+  const claves = ['destinoPrueba', 'webhookToken', 'metaAppSecret', 'metaVerifyToken', 'sociosPrueba', 'urlPublica'] as const;
   const original = Object.fromEntries(claves.map((k) => [k, env.mensajeria[k]]));
   const proveedor = new ProveedorQueAcepta();
   const envios = crearServicioEnvios(proveedor);
@@ -40,7 +45,7 @@ describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
     await limpiarBase();
     await catalogo();
     g = await crearGimnasio();
-    Object.assign(env.mensajeria, { destinoPrueba: '5490000000000', webhookToken: 'token-webhook-prueba', metaAppSecret: 'clave-app-prueba', metaVerifyToken: 'verificar-prueba' });
+    Object.assign(env.mensajeria, { destinoPrueba: '5490000000000', webhookToken: 'token-webhook-prueba', metaAppSecret: 'clave-app-prueba', metaVerifyToken: 'verificar-prueba', urlPublica: 'https://tunel.prueba.dev' });
   });
   afterAll(async () => {
     Object.assign(env.mensajeria, original);
@@ -81,6 +86,24 @@ describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
     const envio = await prisma.envioMensaje.findUniqueOrThrow({ where: { referencia: `comprobante:${comprobante.id}` } });
     expect(envio).toMatchObject({ estado: 'ACEPTADO', tipo: 'COMPROBANTE', cuotaId: cuota.id });
     expect(envio.texto).toContain(comprobante.numero);
+    // El comprobante viaja como PDF adjunto (el texto es el caption, no lo reemplaza).
+    expect(envio.adjunto).toBe(`comprobante-${comprobante.numero}.pdf`);
+    const documento = proveedor.documentos.at(-1)!;
+    expect(documento).toMatchObject({ nombreArchivo: `comprobante-${comprobante.numero}.pdf`, texto: envio.texto });
+    expect(documento.url).toMatch(new RegExp(`^https://tunel\\.prueba\\.dev/api/whatsapp/comprobantes/${envio.id}\\.pdf\\?vence=\\d+&firma=`));
+    // El enlace firmado entrega el PDF; alterado o sin firma, no.
+    const enlace = new URL(documento.url);
+    const pdf = await request(app).get(`${enlace.pathname}${enlace.search}`).buffer(true).parse((r, fin) => {
+      const partes: Buffer[] = [];
+      r.on('data', (p: Buffer) => partes.push(p));
+      r.on('end', () => fin(null, Buffer.concat(partes)));
+    });
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.headers['cache-control']).toContain('no-store');
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    await request(app).get(`${enlace.pathname}?vence=${enlace.searchParams.get('vence')}&firma=alterada`).expect(401);
+    await request(app).get(enlace.pathname).expect(401);
     expect(comprobante.fechaEnvio).toBeNull(); // todavía sin confirmación del proveedor
 
     // Webhook de Mercado Pago repetido: ni otro comprobante ni otro mensaje.
@@ -132,6 +155,24 @@ describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
       .send(webhook([{ id: aceptado.idMensaje, status: 'failed', timestamp: ts(), errors: [{ code: 131031, title: 'Business Account locked' }] }]))
       .expect(200);
     expect(await prisma.envioMensaje.findUniqueOrThrow({ where: { id: aceptado.id } })).toMatchObject({ estado: 'FALLIDO', detalle: expect.stringContaining('131031') });
+  });
+
+  it('sin URL pública HTTPS el comprobante no se envía y nunca se reemplaza por solo texto', async () => {
+    const socio = await socioHabilitado();
+    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
+    const pago = await prisma.pago.create({ data: { cuotaId: cuota.id, medio: 'PAGO_UNICO', importe: 30000, estado: 'PENDIENTE' } });
+    const base = env.mensajeria.urlPublica;
+    env.mensajeria.urlPublica = '';
+    const antes = proveedor.solicitudes.length;
+    await cuotas.registrarResultado({ tipo: 'PAGO', pagoId: pago.id, referenciaExterna: 'MP-WA-SINURL', aprobado: true });
+    env.mensajeria.urlPublica = base;
+    const comprobante = await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: pago.id } });
+    expect(await prisma.envioMensaje.findUniqueOrThrow({ where: { referencia: `comprobante:${comprobante.id}` } })).toMatchObject({
+      estado: 'FALLIDO',
+      detalle: expect.stringContaining('WHATSAPP_URL_PUBLICA'),
+    });
+    expect(proveedor.solicitudes.length).toBe(antes);
+    expect((await prisma.pago.findUniqueOrThrow({ where: { id: pago.id } })).estado).toBe('APROBADO');
   });
 
   it('escenario 3: un pago rechazado no genera comprobante ni envío', async () => {

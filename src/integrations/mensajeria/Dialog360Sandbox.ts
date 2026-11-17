@@ -1,5 +1,5 @@
 import { env } from '../../config/env';
-import type { ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
 
 export interface OpcionesDialog360 {
   apiKey: string;
@@ -30,13 +30,25 @@ export class Dialog360Sandbox implements ServicioMensajeria {
 
   /** El sandbox solo puede escribirle al número de la clave: el teléfono del socio nunca se usa. */
   async enviar(_telefono: string, texto: string): Promise<ResultadoEnvio> {
+    return this.solicitar({ type: 'text', text: { body: texto } });
+  }
+
+  /**
+   * Documento por enlace HTTPS (el sandbox no permite subir archivos por media ID):
+   * WhatsApp lo descarga de la URL y lo entrega como archivo adjunto, con el texto como caption.
+   */
+  async enviarDocumento(_telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
+    return this.solicitar({ type: 'document', document: { link: documento.url, filename: documento.nombreArchivo, caption: documento.texto } });
+  }
+
+  private async solicitar(mensaje: Record<string, unknown>): Promise<ResultadoEnvio> {
     const destino = this.opciones.destino.replace(/\D/g, '');
     if (!destino) return { aceptado: false, error: 'Falta WHATSAPP_TEST_RECIPIENT (el número que envió START al sandbox)' };
     try {
       const respuesta = await fetch(`${this.opciones.url}/v1/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'D360-API-KEY': this.opciones.apiKey },
-        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: destino, type: 'text', text: { body: texto } }),
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: destino, ...mensaje }),
       });
       const cuerpo = (await respuesta.json().catch(() => ({}))) as { messages?: { id: string }[]; error?: unknown; meta?: { developer_message?: string } };
       if (!respuesta.ok) {

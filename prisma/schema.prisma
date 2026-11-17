@@ -1207,6 +1207,8 @@ model EnvioMensaje {
   proveedor      String             @db.VarChar(40)
   destino        String?            @db.VarChar(30)
   texto          String             @db.Text
+  /// Archivo adjunto enviado (p. ej. el PDF del comprobante); null si es solo texto.
+  adjunto        String?            @db.VarChar(120)
   estado         EstadoEnvioMensaje @default(PREPARADO)
   idMensaje      String?            @unique @map("id_mensaje") @db.VarChar(200)
   detalle        String?            @db.VarChar(500)

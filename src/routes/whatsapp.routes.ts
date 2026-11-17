@@ -1,6 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import { env } from '../config/env';
 import { firmaMetaValida, interpretarEstadosWhatsapp, tokenValido } from '../integrations/mensajeria';
+import { prisma } from '../config/prisma';
+import { pdfDeComprobante } from '../services/comprobantePdf.service';
+import { verificarEnlace } from '../services/enlaceComprobante';
 import { servicioEnvios } from '../services/envioMensajes.service';
 
 /**
@@ -31,6 +34,28 @@ whatsappRoutes.post('/webhook/meta', async (req, res) => {
     return res.status(401).json({ error: 'FIRMA_INVALIDA' });
   }
   await registrar(req, res, 'Meta');
+});
+
+// PDF del comprobante para que WhatsApp lo descargue: enlace firmado (HMAC) y vigente
+// por 15 minutos. Sin firma válida no se entrega nada; no se guarda ningún archivo.
+whatsappRoutes.get('/comprobantes/:archivo', async (req, res) => {
+  const envioId = Number(/^(\d+)\.pdf$/.exec(req.params.archivo)?.[1]);
+  if (!envioId) return res.status(404).json({ error: 'NO_ENCONTRADO' });
+  const verificacion = verificarEnlace(envioId, req.query.vence, req.query.firma);
+  if (verificacion === 'invalido') return res.status(401).json({ error: 'ENLACE_INVALIDO' });
+  if (verificacion === 'vencido') return res.status(410).json({ error: 'ENLACE_VENCIDO' });
+  const envio = await prisma.envioMensaje.findUnique({ where: { id: envioId }, include: { comprobante: true } });
+  if (!envio || envio.tipo !== 'COMPROBANTE' || !envio.comprobante) return res.status(404).json({ error: 'NO_ENCONTRADO' });
+  const pdf = await pdfDeComprobante(envio.comprobante.pagoId);
+  if (!pdf) return res.status(404).json({ error: 'NO_ENCONTRADO' });
+  res
+    .set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${pdf.nombre}"`,
+      'Cache-Control': 'no-store, private',
+      'X-Robots-Tag': 'noindex, nofollow',
+    })
+    .send(pdf.contenido);
 });
 
 // 360dialog (sandbox): la URL registrada incluye el token secreto.

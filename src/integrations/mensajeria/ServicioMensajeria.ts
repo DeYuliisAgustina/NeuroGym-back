@@ -18,8 +18,17 @@ export interface ResultadoEnvio {
  * Puerto del servicio de mensajería compatible con WhatsApp (RNF10).
  * Se usa para comprobantes, vencimientos y avisos; el proveedor se cambia sin tocar la lógica de negocio.
  */
+/** Documento adjunto: WhatsApp lo descarga desde una URL HTTPS (enlace firmado y de corta duración). */
+export interface DocumentoAdjunto {
+  url: string;
+  nombreArchivo: string;
+  /** Texto que acompaña al archivo (caption); no lo reemplaza. */
+  texto: string;
+}
+
 export interface ServicioMensajeria {
   readonly proveedor: ProveedorMensajeria;
   readonly simulado: boolean;
   enviar(telefono: string, texto: string): Promise<ResultadoEnvio>;
+  enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio>;
 }

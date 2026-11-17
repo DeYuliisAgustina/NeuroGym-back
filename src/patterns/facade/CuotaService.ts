@@ -11,6 +11,7 @@ import type { ServicioMensajeria } from '../../integrations/mensajeria';
 import { cuotaRepository } from '../../repositories/cuota.repository';
 import { registrarAuditoria } from '../../services/auditoria.service';
 import { generarCuotaSocio } from '../../services/cuotaGeneracion.service';
+import { dinero, mesAnio } from '../../services/comprobantePdf.service';
 import { crearServicioEnvios, type ServicioEnvios } from '../../services/envioMensajes.service';
 import { notificacionService } from '../../services/notificacion.service';
 import { preciosParaSocio } from '../../services/precios.service';
@@ -594,10 +595,11 @@ export class CuotaService {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
     if (!pago?.comprobante) return null;
     const { socio } = pago.cuota;
+    // Acompaña al PDF (caption); el comprobante completo es el archivo adjunto.
     const texto =
-      `NeuroGym - Comprobante ${pago.comprobante.numero}\n` +
-      `Cuota ${pago.cuota.periodo} · ${pago.medio.replace('_', ' ').toLowerCase()}\n` +
-      `Importe abonado: $${aNumero(pago.importe).toFixed(2)} · ${fechaIso(pago.fecha)}`;
+      `NeuroGym · Comprobante ${pago.comprobante.numero}\n` +
+      `Tu pago de ${dinero(aNumero(pago.importe))} de la cuota ${mesAnio(pago.cuota.periodo)} fue registrado. ` +
+      'Te enviamos el comprobante en PDF.';
     if (opciones.avisoInterno !== false) {
       await notificacionService.notificar({ usuarioId: socio.usuarioId, tipo: 'PAGO', mensaje: `Pago confirmado: cuota ${pago.cuota.periodo}.` });
     }
@@ -611,6 +613,7 @@ export class CuotaService {
         comprobanteId: pago.comprobante.id,
         cuotaId: pago.cuotaId,
         tipoNotificacion: 'PAGO',
+        documento: { nombreArchivo: `comprobante-${pago.comprobante.numero}.pdf` },
       });
     } catch (error) {
       console.error('[WhatsApp] No se pudo registrar el envío del comprobante:', (error as Error).message);

@@ -58,6 +58,8 @@ export const env = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+    // URL HTTPS pública del backend (túnel en desarrollo): WhatsApp descarga de ahí el PDF del comprobante.
+    urlPublica: process.env.WHATSAPP_URL_PUBLICA ?? '',
     // Webhooks de estado: token de la ruta de 360dialog y, para Meta, clave de la app y token de verificación.
     webhookToken: process.env.WHATSAPP_WEBHOOK_TOKEN ?? '',
     metaAppSecret: process.env.WHATSAPP_APP_SECRET ?? '',

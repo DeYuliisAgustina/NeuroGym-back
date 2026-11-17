@@ -121,7 +121,8 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     const enviadosAntes = mensajeria.enviados.length;
     await expect(cuotaService.reenviarComprobante(body.pagoId)).resolves.toMatchObject({ estado: 'SIMULADO' });
     expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
-    expect(mensajeria.enviados.at(-1)?.texto).toContain(`Cuota ${cuota.periodo}`);
+    expect(mensajeria.enviados.at(-1)?.texto).toContain("Te enviamos el comprobante en PDF");
+    expect(mensajeria.documentos.at(-1)?.documento.nombreArchivo).toMatch(/^comprobante-NG-\d{8}\.pdf$/);
     expect(await prisma.pago.count({ where: { cuotaId: cuota.id } })).toBe(1);
     expect(await prisma.comprobante.count({ where: { pagoId: body.pagoId } })).toBe(1);
     // Una simulación nunca marca el comprobante como enviado.

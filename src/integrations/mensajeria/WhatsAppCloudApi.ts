@@ -1,5 +1,5 @@
 import { env } from '../../config/env';
-import type { ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
 
 /** Normaliza un teléfono argentino al formato internacional sin '+' que exige la API. */
 export function normalizarTelefono(telefono: string): string {
@@ -60,6 +60,15 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
   }
 
   async enviar(telefono: string, texto: string): Promise<ResultadoEnvio> {
+    return this.solicitar(telefono, { type: 'text', text: { body: texto } });
+  }
+
+  /** Documento por enlace HTTPS: Meta lo descarga y lo entrega como archivo adjunto con caption. */
+  async enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
+    return this.solicitar(telefono, { type: 'document', document: { link: documento.url, filename: documento.nombreArchivo, caption: documento.texto } });
+  }
+
+  private async solicitar(telefono: string, mensaje: Record<string, unknown>): Promise<ResultadoEnvio> {
     const destino = this.destinoDe(telefono);
     if (!destino) {
       return { aceptado: false, error: 'Falta WHATSAPP_TEST_RECIPIENT: en modo de prueba no se envían mensajes a teléfonos de socios' };
@@ -69,13 +78,7 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
       const respuesta = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: destino,
-          type: 'text',
-          text: { body: texto },
-        }),
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: destino, ...mensaje }),
       });
       const cuerpo = (await respuesta.json()) as { messages?: { id: string }[]; error?: { message?: string; code?: number } };
       if (!respuesta.ok) {

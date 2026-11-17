@@ -1,4 +1,4 @@
-import type { ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
 
 /**
  * SIMULACIÓN de mensajería para las pruebas automáticas y para cuando no hay
@@ -17,5 +17,12 @@ export class MensajeriaSimulada implements ServicioMensajeria {
     this.enviados.push({ telefono, texto, fecha: new Date() });
     if (process.env.NODE_ENV === 'development') console.log(`[WhatsApp simulado, no se envía] → ${telefono}: ${texto}`);
     return { aceptado: true, idMensaje: `sim-${Date.now()}-${this.enviados.length}`, destino: telefono };
+  }
+
+  readonly documentos: { telefono: string; documento: DocumentoAdjunto }[] = [];
+
+  async enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
+    this.documentos.push({ telefono, documento });
+    return this.enviar(telefono, documento.texto);
   }
 }
