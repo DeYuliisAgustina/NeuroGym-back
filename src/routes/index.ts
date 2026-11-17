@@ -5,6 +5,7 @@ import { adminModulosRoutes, profesionalRoutes, publicoRoutes, socioModulosRoute
 import { notificacionRoutes } from './notificacion.routes';
 import { operacionRoutes } from './operacion.routes';
 import { socioRoutes } from './socio.routes';
+import { whatsappRoutes } from './whatsapp.routes';
 
 /** Punto de entrada de la API REST: agrupa las rutas de cada módulo. */
 export const apiRoutes = Router();
@@ -16,4 +17,5 @@ apiRoutes.use('/socio', socioRoutes, socioModulosRoutes);
 apiRoutes.use('/profesional', profesionalRoutes);
 apiRoutes.use('/turnos-profesionales', turnosProfesionalesRoutes);
 apiRoutes.use('/notificaciones', notificacionRoutes);
+apiRoutes.use('/whatsapp', whatsappRoutes);
 apiRoutes.use('/', operacionRoutes);

@@ -60,7 +60,9 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(resultado.procesado).toBe(true);
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
     const comprobante = await prisma.comprobante.findUniqueOrThrow({ where: { pagoId } });
-    expect(comprobante.fechaEnvio).not.toBeNull();
+    // Simulación: el envío queda registrado como SIMULADO y el comprobante NO figura enviado.
+    expect(comprobante.fechaEnvio).toBeNull();
+    expect(await prisma.envioMensaje.findUniqueOrThrow({ where: { referencia: `comprobante:${comprobante.id}` } })).toMatchObject({ estado: 'SIMULADO', tipo: 'COMPROBANTE' });
     expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
 
     // Webhook repetido: no se duplican pagos, comprobantes ni mensajes.
@@ -104,16 +106,26 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-falla', aprobado: true });
     mensajeria.fallar = false;
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
-    expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).toBeNull();
+    const comprobante = await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } });
+    expect(comprobante.fechaEnvio).toBeNull();
+    // El fallo de comunicación queda documentado en el envío, sin afectar el pago.
+    expect(await prisma.envioMensaje.findUniqueOrThrow({ where: { referencia: `comprobante:${comprobante.id}` } })).toMatchObject({
+      estado: 'FALLIDO',
+      detalle: expect.stringContaining('Falla simulada'),
+      fechaFallido: expect.any(Date),
+    });
+    const vista = await request(app).get(`/api/socio/pagos/${body.pagoId}/comprobante`).set(conToken(socio.token));
+    expect(vista.body).toMatchObject({ fechaEnvio: null, envioWhatsapp: { estado: 'FALLIDO' } });
 
     // Reenvío posterior (npm run whatsapp:probar): repite solo el mensaje, sin nuevos pagos ni comprobantes.
     const enviadosAntes = mensajeria.enviados.length;
-    await expect(cuotaService.reenviarComprobante(body.pagoId)).resolves.toEqual({ enviado: true, error: undefined });
+    await expect(cuotaService.reenviarComprobante(body.pagoId)).resolves.toMatchObject({ estado: 'SIMULADO' });
     expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
     expect(mensajeria.enviados.at(-1)?.texto).toContain(`Cuota ${cuota.periodo}`);
     expect(await prisma.pago.count({ where: { cuotaId: cuota.id } })).toBe(1);
     expect(await prisma.comprobante.count({ where: { pagoId: body.pagoId } })).toBe(1);
-    expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).not.toBeNull();
+    // Una simulación nunca marca el comprobante como enviado.
+    expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).toBeNull();
     // Un pago no aprobado no tiene comprobante para reenviar.
     const otro = await crearSocio(g.sedeA.id);
     const otraCuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: otro.id } });

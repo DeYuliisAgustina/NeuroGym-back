@@ -11,6 +11,7 @@ import type { ServicioMensajeria } from '../../integrations/mensajeria';
 import { cuotaRepository } from '../../repositories/cuota.repository';
 import { registrarAuditoria } from '../../services/auditoria.service';
 import { generarCuotaSocio } from '../../services/cuotaGeneracion.service';
+import { crearServicioEnvios, type ServicioEnvios } from '../../services/envioMensajes.service';
 import { notificacionService } from '../../services/notificacion.service';
 import { preciosParaSocio } from '../../services/precios.service';
 import { aNumero } from '../../utils/dinero';
@@ -45,6 +46,7 @@ const DEBITO_PROGRAMADO = () =>
  */
 export class CuotaService {
   private estrategia: EstrategiaCobro;
+  private readonly envios: ServicioEnvios;
   private readonly estrategias: Record<MedioPago, EstrategiaCobro>;
 
   constructor(
@@ -52,6 +54,7 @@ export class CuotaService {
     private readonly mensajeria: ServicioMensajeria,
   ) {
     this.estrategias = crearEstrategiasCobro(gateway);
+    this.envios = crearServicioEnvios(mensajeria);
     this.estrategia = this.estrategias.PAGO_UNICO;
   }
 
@@ -108,11 +111,17 @@ export class CuotaService {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
     if (!pago || !pago.comprobante || !this.puedeVer(pago.cuota, solicitante)) throw noEncontrado('Comprobante');
     const { cuota } = pago;
+    // El envío por WhatsApp se informa según lo que confirmó el proveedor. Los
+    // comprobantes anteriores a este registro (fecha cargada por la simulación) no se
+    // muestran como enviados: sin confirmación, «sin envío confirmado».
+    const envioWhatsapp = await this.estadoEnvioComprobante(pago.comprobante.id);
+    const confirmado = envioWhatsapp && ['ENVIADO', 'ENTREGADO', 'LEIDO'].includes(envioWhatsapp.estado);
     // RD12: el comprobante muestra los importes congelados al momento del pago.
     return {
       numero: pago.comprobante.numero,
       fechaEmision: pago.comprobante.fechaEmision,
-      fechaEnvio: pago.comprobante.fechaEnvio,
+      fechaEnvio: confirmado ? pago.comprobante.fechaEnvio : null,
+      envioWhatsapp,
       socio: `${cuota.socio.usuario.nombre} ${cuota.socio.usuario.apellido}`,
       sede: cuota.socio.sede.nombre,
       periodo: cuota.periodo,
@@ -203,7 +212,7 @@ export class CuotaService {
     });
     // CU-001-007: el registro en efectivo también envía el comprobante.
     const envio = await this.enviarComprobante(pagoId);
-    return { pagoId, comprobanteEnviado: envio };
+    return { pagoId, envioWhatsapp: { estado: envio?.estado ?? 'FALLIDO', detalle: envio?.detalle ?? null } };
   }
 
   /** CU-001-010: baja de la adhesión; desde la cuota siguiente se cobra el importe completo. */
@@ -568,17 +577,22 @@ export class CuotaService {
    * Reenvía por mensajería el comprobante de un pago ya aprobado. No crea pagos
    * ni comprobantes ni consulta a Mercado Pago: solo repite el envío.
    */
-  async reenviarComprobante(pagoId: number): Promise<{ enviado: boolean; error?: string }> {
+  async reenviarComprobante(pagoId: number) {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
     if (!pago?.comprobante || pago.estado !== 'APROBADO') throw noEncontrado('Comprobante');
-    let error: string | undefined;
-    const enviado = await this.enviarComprobante(pagoId, { avisoInterno: false, alFallar: (e) => (error = e) });
-    return { enviado, error };
+    // Reenvío explícito: referencia propia para no confundirlo con el envío original.
+    const envio = await this.enviarComprobante(pagoId, { avisoInterno: false, referencia: `comprobante:${pago.comprobante.id}:reenvio:${Date.now()}` });
+    return { estado: envio?.estado ?? 'FALLIDO', detalle: envio?.detalle ?? undefined, idMensaje: envio?.idMensaje ?? undefined };
   }
 
-  private async enviarComprobante(pagoId: number, opciones: { avisoInterno?: boolean; alFallar?: (error?: string) => void } = {}): Promise<boolean> {
+  /**
+   * CU-001-007 paso 3: solicita el envío automático del comprobante por WhatsApp.
+   * Un fallo de comunicación queda registrado en el envío y nunca deshace el pago (3.1).
+   * La fecha de envío del comprobante la completa el webhook del proveedor.
+   */
+  private async enviarComprobante(pagoId: number, opciones: { avisoInterno?: boolean; referencia?: string } = {}) {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
-    if (!pago?.comprobante) return false;
+    if (!pago?.comprobante) return null;
     const { socio } = pago.cuota;
     const texto =
       `NeuroGym - Comprobante ${pago.comprobante.numero}\n` +
@@ -587,16 +601,42 @@ export class CuotaService {
     if (opciones.avisoInterno !== false) {
       await notificacionService.notificar({ usuarioId: socio.usuarioId, tipo: 'PAGO', mensaje: `Pago confirmado: cuota ${pago.cuota.periodo}.` });
     }
-    const resultado = await this.mensajeria.enviar(socio.telefono, texto);
-    if (!resultado.enviado) {
-      opciones.alFallar?.(resultado.error);
-      return false;
+    try {
+      return await this.envios.enviar({
+        tipo: 'COMPROBANTE',
+        referencia: opciones.referencia ?? `comprobante:${pago.comprobante.id}`,
+        usuarioId: socio.usuarioId,
+        telefono: socio.telefono,
+        texto,
+        comprobanteId: pago.comprobante.id,
+        cuotaId: pago.cuotaId,
+        tipoNotificacion: 'PAGO',
+      });
+    } catch (error) {
+      console.error('[WhatsApp] No se pudo registrar el envío del comprobante:', (error as Error).message);
+      return null;
     }
-    await prisma.$transaction([
-      prisma.comprobante.update({ where: { id: pago.comprobante.id }, data: { fechaEnvio: new Date() } }),
-      prisma.notificacion.create({ data: { usuarioId: socio.usuarioId, tipo: 'PAGO', canal: 'MENSAJERIA', mensaje: texto } }),
-    ]);
-    return true;
+  }
+
+  /** Estado real del último envío por WhatsApp de un comprobante. */
+  async estadoEnvioComprobante(comprobanteId: number) {
+    const envio = await this.envios.ultimoDeComprobante(comprobanteId);
+    if (!envio) return null;
+    return {
+      estado: envio.estado,
+      proveedor: envio.proveedor,
+      detalle: envio.detalle,
+      fechaAceptado: envio.fechaAceptado,
+      fechaEnviado: envio.fechaEnviado,
+      fechaEntregado: envio.fechaEntregado,
+      fechaLeido: envio.fechaLeido,
+      fechaFallido: envio.fechaFallido,
+    };
+  }
+
+  /** Webhook de estados del proveedor de WhatsApp (Meta o 360dialog). */
+  registrarEstadosMensajes(estados: Parameters<ServicioEnvios['registrarEstados']>[0]) {
+    return this.envios.registrarEstados(estados);
   }
 
   // ------------------------------------------------------------------

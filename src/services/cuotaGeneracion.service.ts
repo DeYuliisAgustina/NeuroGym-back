@@ -59,7 +59,7 @@ export async function marcarCuotasVencidas(hoy = ahoraLocal().fecha) {
     await prisma.cuota.update({ where: { id: cuota.id }, data: { estado: 'IMPAGA' } });
     const mensaje = `Tu cuota ${cuota.periodo} venció y figura impaga. Podés abonarla desde "Cuotas y pagos".`;
     await notificacionService.notificar({ usuarioId: cuota.socio.usuarioId, tipo: 'VENCIMIENTO', mensaje });
-    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje });
+    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje, cuotaId: cuota.id, referencia: `vencimiento:${cuota.id}:impaga` });
   }
   return { impagas: vencidas.length };
 }
@@ -74,7 +74,7 @@ export async function avisarProximosVencimientos(hoy = ahoraLocal().fecha) {
   for (const cuota of cuotas) {
     const mensaje = `Recordatorio: tu cuota ${cuota.periodo} vence el ${cuota.fechaVencimiento.toISOString().slice(0, 10)}.`;
     await notificacionService.notificar({ usuarioId: cuota.socio.usuarioId, tipo: 'VENCIMIENTO', mensaje });
-    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje });
+    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje, cuotaId: cuota.id, referencia: `vencimiento:${cuota.id}:recordatorio` });
   }
   return { avisos: cuotas.length };
 }

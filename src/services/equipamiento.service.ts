@@ -379,7 +379,13 @@ async function avisarSociosAfectados(equipoId: number, nombreEquipo: string, sed
     avisados.add(r.socioId);
     const mensaje = `El equipo ${nombreEquipo} estará en mantenimiento durante tu turno del ${fecha} a las ${horaTexto(r.turno.horaInicio)}. Podés consultar una variante en "Mi rutina".`;
     await notificacionService.notificar({ usuarioId: r.socio.usuarioId, tipo: 'EQUIPAMIENTO', mensaje });
-    await notificacionService.enviarMensaje({ usuarioId: r.socio.usuarioId, telefono: r.socio.telefono, tipo: 'EQUIPAMIENTO', mensaje });
+    await notificacionService.enviarMensaje({
+      usuarioId: r.socio.usuarioId,
+      telefono: r.socio.telefono,
+      tipo: 'EQUIPAMIENTO',
+      mensaje,
+      referencia: `mantenimiento:${equipoId}:${inicio.toISOString()}:socio:${r.socioId}`,
+    });
   }
   return avisados.size;
 }

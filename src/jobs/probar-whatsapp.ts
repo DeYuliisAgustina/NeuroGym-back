@@ -1,40 +1,53 @@
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
+import { Dialog360Sandbox, servicioMensajeria } from '../integrations/mensajeria';
 import { enmascararTelefono } from '../integrations/mensajeria/WhatsAppCloudApi';
 import { cuotaService } from '../patterns/facade';
 
 /**
- * Prueba de WhatsApp Business Cloud API con el número de prueba gratuito de Meta:
- *   npm run whatsapp:probar             → solo verifica la configuración
- *   npm run whatsapp:probar -- <pagoId> → reenvía el comprobante de ese pago aprobado
- * No crea pagos ni cobra nada. Nunca muestra el token y oculta el número destino.
+ * Prueba de WhatsApp con el proveedor configurado (sin costo):
+ *   npm run whatsapp:probar                          → muestra la configuración
+ *   npm run whatsapp:probar -- --webhook <URL https>  → registra el webhook de estados en el sandbox de 360dialog
+ *   npm run whatsapp:probar -- <pagoId>               → reenvía el comprobante de ese pago aprobado y sigue su estado
+ * No crea pagos ni comprobantes. Nunca muestra claves ni tokens y oculta el número destino.
  */
 async function probar() {
   const m = env.mensajeria;
   const cargada = (v: string) => (v ? 'cargada' : 'VACÍA');
-  console.log('WHATSAPP_TOKEN          ', cargada(m.whatsappToken));
-  console.log('WHATSAPP_PHONE_NUMBER_ID', cargada(m.whatsappPhoneNumberId));
-  console.log('WHATSAPP_TEST_RECIPIENT ', m.destinoPrueba ? enmascararTelefono(m.destinoPrueba) : 'VACÍA');
-  console.log('Graph API               ', m.apiVersion);
-  if (m.simulado) {
-    console.log('\nResultado: mensajería SIMULADA (faltan el token o el id del número).');
-    return;
+  console.log('Proveedor               ', servicioMensajeria.proveedor);
+  console.log('Destinatario de prueba  ', m.destinoPrueba ? enmascararTelefono(m.destinoPrueba) : 'VACÍO');
+  console.log('Socios habilitados      ', m.sociosPrueba.length ? m.sociosPrueba.join(', ') : 'NINGUNO');
+  if (servicioMensajeria.proveedor === 'DIALOG360_SANDBOX') {
+    console.log('DIALOG360_API_KEY       ', cargada(m.dialog360ApiKey));
+    console.log('WHATSAPP_WEBHOOK_TOKEN  ', cargada(m.webhookToken));
   }
-  // Datos públicos del número emisor (el de prueba de Meta se llama "Test Number").
-  const r = await fetch(`https://graph.facebook.com/${m.apiVersion}/${m.whatsappPhoneNumberId}?fields=display_phone_number,verified_name,quality_rating`, {
-    headers: { Authorization: `Bearer ${m.whatsappToken}` },
-  });
-  const numero = (await r.json()) as { verified_name?: string; display_phone_number?: string; error?: { code?: number; message?: string } };
-  if (!r.ok) {
-    console.log(`\nMeta rechazó la consulta del número (${numero.error?.code ?? r.status}): ${numero.error?.message ?? ''}`);
-    return;
+  if (servicioMensajeria.proveedor === 'META_CLOUD_API') {
+    console.log('WHATSAPP_TOKEN          ', cargada(m.whatsappToken));
+    console.log('WHATSAPP_APP_SECRET     ', cargada(m.metaAppSecret));
   }
-  console.log(`Número emisor            ${numero.verified_name} (${numero.display_phone_number})`);
 
-  const pagoId = Number(process.argv[2]);
+  const [arg, valor] = process.argv.slice(2);
+  if (arg === '--webhook') {
+    if (!(servicioMensajeria instanceof Dialog360Sandbox)) throw new Error('El registro automático del webhook es para el sandbox de 360dialog');
+    if (!valor?.startsWith('https://') || !m.webhookToken) throw new Error('Indicá una URL https pública y cargá WHATSAPP_WEBHOOK_TOKEN');
+    const url = `${valor.replace(/\/$/, '')}/api/whatsapp/webhook/360dialog/${m.webhookToken}`;
+    const r = await servicioMensajeria.configurarWebhook(url);
+    console.log(r.ok ? '\nWebhook de estados registrado en el sandbox.' : `\n360dialog rechazó el webhook (HTTP ${r.estado}): ${r.detalle}`);
+    return;
+  }
+
+  const pagoId = Number(arg);
   if (!pagoId) return;
-  const resultado = await cuotaService.reenviarComprobante(pagoId);
-  console.log(resultado.enviado ? `\nComprobante del pago #${pagoId} enviado.` : `\nNo se envió: ${resultado.error}`);
+  const r = await cuotaService.reenviarComprobante(pagoId);
+  console.log(`\nComprobante del pago #${pagoId}: ${r.estado}${r.detalle ? ` · ${r.detalle}` : ''}`);
+  if (r.estado !== 'ACEPTADO' || !r.idMensaje) return;
+  // Seguimiento: los estados reales llegan por webhook al backend; se consultan durante 60 s.
+  for (let i = 0; i < 12; i++) {
+    await new Promise((ok) => setTimeout(ok, 5000));
+    const envio = await prisma.envioMensaje.findUnique({ where: { idMensaje: r.idMensaje } });
+    console.log(`  +${(i + 1) * 5}s: ${envio?.estado}${envio?.detalle ? ` · ${envio.detalle}` : ''}`);
+    if (envio && ['ENTREGADO', 'LEIDO', 'FALLIDO'].includes(envio.estado)) break;
+  }
 }
 
 probar()

@@ -12,6 +12,8 @@ export const enmascararTelefono = (telefono: string) => telefono.replace(/\D/g, 
 
 /** Explicación de los errores habituales del número de prueba de Meta. */
 const AYUDA_ERRORES: Record<number, string> = {
+  131031: 'la cuenta de WhatsApp Business está bloqueada por Meta (ver Health Status API)',
+  141006: 'Meta exige un método de pago en la cuenta para conversaciones iniciadas por la empresa',
   131030: 'el destinatario no está en la lista de números habilitados del número de prueba',
   131047: 'pasaron más de 24 h desde el último mensaje del destinatario: escribile primero al número de prueba',
   190: 'el token de acceso venció o no es válido',
@@ -37,6 +39,7 @@ export interface OpcionesWhatsApp {
  * destinatario; fuera de ella Meta exige plantillas aprobadas.
  */
 export class WhatsAppCloudApi implements ServicioMensajeria {
+  readonly proveedor = 'META_CLOUD_API' as const;
   readonly simulado = false;
 
   constructor(
@@ -59,7 +62,7 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
   async enviar(telefono: string, texto: string): Promise<ResultadoEnvio> {
     const destino = this.destinoDe(telefono);
     if (!destino) {
-      return { enviado: false, error: 'Falta WHATSAPP_TEST_RECIPIENT: en modo de prueba no se envían mensajes a teléfonos de socios' };
+      return { aceptado: false, error: 'Falta WHATSAPP_TEST_RECIPIENT: en modo de prueba no se envían mensajes a teléfonos de socios' };
     }
     const { apiVersion, phoneNumberId, token } = this.opciones;
     try {
@@ -78,11 +81,11 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
       if (!respuesta.ok) {
         const codigo = cuerpo.error?.code;
         const ayuda = codigo ? AYUDA_ERRORES[codigo] : undefined;
-        return { enviado: false, error: `Meta ${codigo ?? `HTTP ${respuesta.status}`}: ${ayuda ?? cuerpo.error?.message ?? 'error desconocido'}` };
+        return { aceptado: false, error: `Meta ${codigo ?? `HTTP ${respuesta.status}`}: ${ayuda ?? cuerpo.error?.message ?? 'error desconocido'}` };
       }
-      return { enviado: true, idMensaje: cuerpo.messages?.[0]?.id };
+      return { aceptado: true, idMensaje: cuerpo.messages?.[0]?.id, destino };
     } catch (error) {
-      return { enviado: false, error: (error as Error).message };
+      return { aceptado: false, error: (error as Error).message };
     }
   }
 }

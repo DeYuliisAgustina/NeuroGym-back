@@ -1,6 +1,6 @@
 import type { TipoNotificacion } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
-import { servicioMensajeria } from '../integrations/mensajeria';
+import { servicioEnvios } from './envioMensajes.service';
 import { noEncontrado } from '../utils/errores';
 
 /** Notificaciones internas (RF33) y avisos por mensajería compatible con WhatsApp (RNF10). */
@@ -18,12 +18,22 @@ export const notificacionService = {
     telefono: string;
     tipo: TipoNotificacion;
     mensaje: string;
+    /** Clave de idempotencia del evento (un mismo aviso no se envía dos veces). */
+    referencia: string;
+    cuotaId?: number;
     eventoTurnoId?: number;
   }) {
-    const { telefono, ...registro } = datos;
-    const resultado = await servicioMensajeria.enviar(telefono, datos.mensaje);
-    if (resultado.enviado) await prisma.notificacion.create({ data: { ...registro, canal: 'MENSAJERIA' } });
-    return resultado;
+    // El estado real (aceptado, enviado, entregado, leído o fallido) queda en envio_mensaje.
+    return servicioEnvios.enviar({
+      tipo: datos.tipo === 'VENCIMIENTO' ? 'VENCIMIENTO' : 'AVISO',
+      referencia: datos.referencia,
+      usuarioId: datos.usuarioId,
+      telefono: datos.telefono,
+      texto: datos.mensaje,
+      cuotaId: datos.cuotaId,
+      tipoNotificacion: datos.tipo,
+      eventoTurnoId: datos.eventoTurnoId,
+    });
   },
 
   listar(usuarioId: number, soloNoLeidas = false) {

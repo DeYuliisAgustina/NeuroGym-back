@@ -49,8 +49,32 @@ export const env = {
     // Fuera de producción TODOS los mensajes van solo a este número (habilitado en el
     // número de prueba de Meta). Sin él no se envía nada: nunca a teléfonos de socios.
     destinoPrueba: process.env.WHATSAPP_TEST_RECIPIENT ?? '',
+    // Sandbox oficial de 360dialog (gratuito, sin tarjeta): clave obtenida enviando START.
+    dialog360ApiKey: process.env.DIALOG360_API_KEY ?? '',
+    dialog360Url: process.env.DIALOG360_URL ?? 'https://waba-sandbox.360dialog.io',
+    // Fuera de producción, solo los socios de esta lista (correos) generan envíos reales,
+    // siempre al número autorizado; el resto queda registrado como OMITIDO.
+    sociosPrueba: (process.env.WHATSAPP_SOCIOS_PRUEBA ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+    // Webhooks de estado: token de la ruta de 360dialog y, para Meta, clave de la app y token de verificación.
+    webhookToken: process.env.WHATSAPP_WEBHOOK_TOKEN ?? '',
+    metaAppSecret: process.env.WHATSAPP_APP_SECRET ?? '',
+    metaVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? '',
+    /** Proveedor elegido (WHATSAPP_PROVEEDOR) o deducido de las credenciales cargadas. */
+    get proveedor(): 'DIALOG360_SANDBOX' | 'META_CLOUD_API' | 'SIMULADO' {
+      const elegido = (process.env.WHATSAPP_PROVEEDOR ?? '').toLowerCase();
+      if (process.env.NODE_ENV === 'test') return 'SIMULADO';
+      if (elegido === '360dialog') return this.dialog360ApiKey ? 'DIALOG360_SANDBOX' : 'SIMULADO';
+      if (elegido === 'meta') return this.whatsappToken && this.whatsappPhoneNumberId ? 'META_CLOUD_API' : 'SIMULADO';
+      if (elegido === 'simulado') return 'SIMULADO';
+      if (this.dialog360ApiKey) return 'DIALOG360_SANDBOX';
+      if (this.whatsappToken && this.whatsappPhoneNumberId) return 'META_CLOUD_API';
+      return 'SIMULADO';
+    },
     get simulado() {
-      return !this.whatsappToken || !this.whatsappPhoneNumberId;
+      return this.proveedor === 'SIMULADO';
     },
   },
   ia: {

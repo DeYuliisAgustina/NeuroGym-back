@@ -321,6 +321,7 @@ model Usuario {
   notificaciones Notificacion[]
   eventosTurno   EventoTurno[]
   auditorias     Auditoria[]
+  enviosMensaje  EnvioMensaje[]
 
   @@map("usuario")
 }
@@ -921,8 +922,9 @@ model Cuota {
   estado           EstadoCuota @default(PENDIENTE)
   fechaVencimiento DateTime    @map("fecha_vencimiento") @db.Date
 
-  socio Socio  @relation(fields: [socioId], references: [id])
-  pagos Pago[]
+  socio  Socio          @relation(fields: [socioId], references: [id])
+  pagos  Pago[]
+  envios EnvioMensaje[]
 
   @@unique([socioId, periodo])
   @@index([estado, fechaVencimiento])
@@ -974,7 +976,8 @@ model Comprobante {
   fechaEmision DateTime  @default(now()) @map("fecha_emision") @db.Timestamp(6)
   fechaEnvio   DateTime? @map("fecha_envio") @db.Timestamp(6)
 
-  pago Pago @relation(fields: [pagoId], references: [id])
+  pago   Pago           @relation(fields: [pagoId], references: [id])
+  envios EnvioMensaje[]
 
   @@map("comprobante")
 }
@@ -1160,4 +1163,67 @@ model Auditoria {
 
   @@index([gimnasioId, fecha])
   @@map("auditoria")
+}
+
+// ---------------------------------------------------------------------
+// Envíos por mensajería compatible con WhatsApp (RNF10, RF32, RF33)
+// Agregado al diccionario de datos: registra cada mensaje y el estado que
+// informa el proveedor. Un HTTP 200 solo significa ACEPTADO, no enviado.
+// ---------------------------------------------------------------------
+
+/// PREPARADO: mensaje armado, todavía sin respuesta del proveedor.
+/// ACEPTADO: el proveedor recibió la solicitud (HTTP 2xx con id); aún no confirmó el envío.
+/// ENVIADO / ENTREGADO / LEIDO: estados informados por el webhook oficial del proveedor.
+/// FALLIDO: el proveedor rechazó la solicitud o informó un fallo (con detalle).
+/// OMITIDO: no se envió a propósito (modo de prueba: socio no habilitado o sin destinatario).
+/// SIMULADO: pruebas automáticas o sin proveedor; nunca cuenta como enviado.
+enum EstadoEnvioMensaje {
+  PREPARADO
+  ACEPTADO
+  ENVIADO
+  ENTREGADO
+  LEIDO
+  FALLIDO
+  OMITIDO
+  SIMULADO
+
+  @@map("estado_envio_mensaje")
+}
+
+enum TipoEnvioMensaje {
+  COMPROBANTE
+  VENCIMIENTO
+  AVISO
+
+  @@map("tipo_envio_mensaje")
+}
+
+model EnvioMensaje {
+  id             Int                @id @default(autoincrement()) @map("envio_id")
+  usuarioId      Int                @map("usuario_id")
+  tipo           TipoEnvioMensaje
+  /// Clave de idempotencia (p. ej. "comprobante:12"): un evento repetido no genera otro mensaje.
+  referencia     String             @unique @db.VarChar(150)
+  proveedor      String             @db.VarChar(40)
+  destino        String?            @db.VarChar(30)
+  texto          String             @db.Text
+  estado         EstadoEnvioMensaje @default(PREPARADO)
+  idMensaje      String?            @unique @map("id_mensaje") @db.VarChar(200)
+  detalle        String?            @db.VarChar(500)
+  comprobanteId  Int?               @map("comprobante_id")
+  cuotaId        Int?               @map("cuota_id")
+  fechaCreacion  DateTime           @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  fechaAceptado  DateTime?          @map("fecha_aceptado") @db.Timestamp(6)
+  fechaEnviado   DateTime?          @map("fecha_enviado") @db.Timestamp(6)
+  fechaEntregado DateTime?          @map("fecha_entregado") @db.Timestamp(6)
+  fechaLeido     DateTime?          @map("fecha_leido") @db.Timestamp(6)
+  fechaFallido   DateTime?          @map("fecha_fallido") @db.Timestamp(6)
+
+  usuario     Usuario      @relation(fields: [usuarioId], references: [id])
+  comprobante Comprobante? @relation(fields: [comprobanteId], references: [id])
+  cuota       Cuota?       @relation(fields: [cuotaId], references: [id])
+
+  @@index([usuarioId, fechaCreacion])
+  @@index([comprobanteId])
+  @@map("envio_mensaje")
 }

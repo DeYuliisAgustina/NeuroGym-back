@@ -15,7 +15,15 @@ export function crearApp() {
   app.set('trust proxy', 1);
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cors({ origin: env.frontendUrl.split(','), credentials: false }));
-  app.use(express.json({ limit: '1mb' }));
+  app.use(
+    express.json({
+      limit: '1mb',
+      // Cuerpo crudo para validar firmas HMAC de webhooks (X-Hub-Signature-256 de Meta).
+      verify: (req, _res, buf) => {
+        (req as unknown as { cuerpoCrudo?: Buffer }).cuerpoCrudo = buf;
+      },
+    }),
+  );
 
   // Archivos de incidencias guardados por el almacenamiento local de desarrollo.
   app.use('/archivos', express.static(env.almacenamiento.directorioLocal, { fallthrough: false }));
