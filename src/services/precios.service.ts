@@ -64,3 +64,14 @@ export async function preciosParaSocio(socioId: number, fecha = ahoraLocal().fec
   }
   return { cuotaBase, adicionalPremium };
 }
+
+/** Precios vigentes de los dos planes del gimnasio (tarjetas "Plan Básico" y "Plan Premium" del socio). */
+export async function preciosDePlanes(gimnasioId: number, fecha = ahoraLocal().fecha) {
+  const planes = await prisma.planSocio.findMany({ where: { gimnasioId } });
+  const precio = (tipo: TipoPlanSocio) => {
+    const plan = planes.find((p) => p.tipo === tipo);
+    return plan ? precioVigente(plan.id, fecha) : Promise.resolve(0);
+  };
+  const [cuotaBase, adicionalPremium] = await Promise.all([precio('BASICO'), precio('PREMIUM')]);
+  return { cuotaBase, adicionalPremium };
+}

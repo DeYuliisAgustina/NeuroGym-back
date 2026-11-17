@@ -2,12 +2,12 @@ import type { Prisma, TipoPlanSocio } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { generarPasswordTemporal } from '../utils/credenciales';
 import { conflicto, reglaNegocio } from '../utils/errores';
-import { ahoraLocal } from '../utils/fechas';
+import { ahoraLocal, fechaIso } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { hashPassword } from './auth.service';
 import { generarCuotaSocio } from './cuotaGeneracion.service';
 import { verificarCupoSocios } from './gimnasio.service';
-import { bonificacionVigente, preciosParaSocio } from './precios.service';
+import { bonificacionVigente, preciosDePlanes, preciosParaSocio } from './precios.service';
 import { tenant } from './tenant.service';
 
 interface DatosSocio {
@@ -28,7 +28,7 @@ async function planDelGimnasio(gimnasioId: number, tipo: TipoPlanSocio) {
 
 /** ABM de socios con baja lógica (RF16, RD20) y autogestión del plan (RF12). */
 export const socioService = {
-  listar(gimnasioId: number, filtros: { sedeId?: number; plan?: TipoPlanSocio; activo?: boolean; busqueda?: string }) {
+  async listar(gimnasioId: number, filtros: { sedeId?: number; plan?: TipoPlanSocio; activo?: boolean; busqueda?: string }) {
     const where: Prisma.SocioWhereInput = {
       sede: { gimnasioId },
       ...(filtros.sedeId ? { sedeId: filtros.sedeId } : {}),
@@ -46,10 +46,27 @@ export const socioService = {
           : {}),
       },
     };
-    return prisma.socio.findMany({
+    const hoy = ahoraLocal().fecha;
+    const socios = await prisma.socio.findMany({
       where,
-      include: { usuario: seleccionUsuario, plan: true, sede: { select: { id: true, nombre: true } } },
+      include: {
+        usuario: seleccionUsuario,
+        plan: true,
+        sede: { select: { id: true, nombre: true } },
+        // Resumen de actividad para el listado: cuota del período y asistencias recientes.
+        cuotas: { where: { periodo: hoy.slice(0, 7) }, select: { estado: true } },
+        reservas: { where: { asistencia: { isNot: null } }, select: { turno: { select: { fecha: true } } }, orderBy: { turno: { fecha: 'desc' } }, take: 40 },
+      },
       orderBy: { usuario: { apellido: 'asc' } },
+    });
+    return socios.map(({ cuotas, reservas, ...s }) => {
+      const fechas = reservas.map((r) => fechaIso(r.turno.fecha));
+      return {
+        ...s,
+        estadoCuota: cuotas[0]?.estado ?? null,
+        asistenciasMes: fechas.filter((f) => f.startsWith(hoy.slice(0, 7))).length,
+        ultimaVisita: fechas[0] ?? null,
+      };
     });
   },
 
@@ -141,10 +158,10 @@ export const socioService = {
   async perfil(socioId: number) {
     const socio = await prisma.socio.findUniqueOrThrow({
       where: { id: socioId },
-      include: { usuario: seleccionUsuario, plan: true, sede: true, preferencia: true },
+      include: { usuario: seleccionUsuario, plan: true, sede: { include: { gimnasio: { select: { razonSocial: true, toleranciaAntesMin: true, toleranciaDespuesMin: true } } } }, preferencia: true },
     });
-    const bonificacion = await bonificacionVigente(socioId);
-    return { ...socio, esPremium: socio.plan.tipo === 'PREMIUM' || bonificacion !== null, bonificacionVigente: bonificacion };
+    const [bonificacion, preciosPlanes] = await Promise.all([bonificacionVigente(socioId), preciosDePlanes(socio.sede.gimnasioId)]);
+    return { ...socio, esPremium: socio.plan.tipo === 'PREMIUM' || bonificacion !== null, bonificacionVigente: bonificacion, preciosPlanes };
   },
 
   async actualizarPerfil(socioId: number, datos: { telefono: string }) {

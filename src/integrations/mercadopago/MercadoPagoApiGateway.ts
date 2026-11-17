@@ -52,9 +52,9 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
         // La referencia vincula el pago de Mercado Pago con el pago PENDIENTE de NeuroGym.
         external_reference: `pago:${s.pagoId}`,
         back_urls: {
-          success: `${frontend}/socio/cuotas?resultado=aprobado`,
-          failure: `${frontend}/socio/cuotas?resultado=rechazado`,
-          pending: `${frontend}/socio/cuotas?resultado=pendiente`,
+          success: `${frontend}/socio/pagos?resultado=aprobado`,
+          failure: `${frontend}/socio/pagos?resultado=rechazado`,
+          pending: `${frontend}/socio/pagos?resultado=pendiente`,
         },
         // Mercado Pago solo acepta el regreso automático hacia URLs públicas (HTTPS).
         ...(frontend.startsWith('https://') ? { auto_return: 'approved' } : {}),
@@ -78,7 +78,7 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
         reason: s.descripcion,
         external_reference: `socio:${s.socioId}`,
         payer_email: pagador,
-        back_url: `${env.mercadoPago.urlRetornoPublica || env.frontendUrl.split(',')[0]}/socio/cuotas?resultado=adhesion`,
+        back_url: `${env.mercadoPago.urlRetornoPublica || env.frontendUrl.split(',')[0]}/socio/pagos?resultado=adhesion`,
         auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: s.importeMensual, currency_id: 'ARS' },
         status: 'pending',
       },
