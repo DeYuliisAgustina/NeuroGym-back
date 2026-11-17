@@ -49,7 +49,7 @@ export interface MercadoPagoGateway {
   /** Consulta una orden de Checkout Pro por su id (notificación "order"). */
   consultarOrden(ordenId: string): Promise<ResultadoOperacion | null>;
   /**
-   * Busca la orden asociada a un pago de NeuroGym (external_reference "pago:{id}").
+   * Busca la orden asociada a un pago de NeuroGym (external_reference "pago-{id}").
    * Se usa al regresar del checkout: la URL de retorno solo lleva el id interno del pago.
    */
   consultarOrdenDePago(pagoId: number, desde: Date): Promise<ResultadoOperacion | null>;

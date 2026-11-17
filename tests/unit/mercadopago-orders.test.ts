@@ -1,9 +1,9 @@
 import { Order, User } from 'mercadopago';
 import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
-import { armarOrdenCheckoutPro, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
+import { armarOrdenCheckoutPro, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway, referenciaDePago } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
 
 const solicitud = { pagoId: 42, descripcion: 'Cuota NeuroGym 2026-11', importe: 44000, emailPagador: 'socio@prueba.local' };
-const orden = (datos: Partial<OrderResponse>) => ({ id: 'ORD01TEST', external_reference: 'pago:42', ...datos }) as OrderResponse;
+const orden = (datos: Partial<OrderResponse>) => ({ id: 'ORD01TEST', external_reference: 'pago-42', ...datos }) as OrderResponse;
 
 describe('Mercado Pago: pago único con la API de Orders (Checkout Pro)', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -14,7 +14,7 @@ describe('Mercado Pago: pago único con la API de Orders (Checkout Pro)', () => 
       type: 'online',
       processing_mode: 'manual',
       total_amount: '44000.00',
-      external_reference: 'pago:42',
+      external_reference: 'pago-42',
       items: [{ unit_price: '44000.00', quantity: 1 }],
     });
     // El total coincide con la suma de los ítems (regla de la API de Orders).
@@ -65,11 +65,21 @@ describe('Mercado Pago: pago único con la API de Orders (Checkout Pro)', () => 
     expect(obtener).toHaveBeenCalledTimes(1);
   });
 
-  it('el retorno busca la orden del pago por su external_reference', async () => {
+  it('el retorno busca la orden del pago por su external_reference y la consulta completa', async () => {
+    // La búsqueda real no incluye los pagos de la orden; la consulta por id sí.
     const buscar = vi.spyOn(Order.prototype, 'search').mockResolvedValue({ data: [orden({ status: 'processed', status_detail: 'accredited' })] });
+    const obtener = vi.spyOn(Order.prototype, 'get').mockResolvedValue(orden({ status: 'processed', status_detail: 'accredited', transactions: { payments: [{ id: 'PAY01E' }] } }));
     const r = await new MercadoPagoApiGateway('TEST-token-de-prueba').consultarOrdenDePago(42, new Date('2026-11-17T10:00:00Z'));
-    expect(r).toMatchObject({ tipo: 'PAGO', pagoId: 42, aprobado: true });
-    expect(buscar.mock.calls[0][0]?.options).toMatchObject({ external_reference: 'pago:42', begin_date: '2026-11-16T10:00:00.000Z' });
+    expect(r).toMatchObject({ tipo: 'PAGO', pagoId: 42, aprobado: true, referenciaExterna: 'PAY01E' });
+    expect(buscar.mock.calls[0][0]?.options).toMatchObject({ external_reference: 'pago-42', begin_date: '2026-11-16T10:00:00.000Z' });
+    expect(obtener).toHaveBeenCalledWith({ id: 'ORD01TEST' });
+  });
+
+  it('el retorno no registra nada si la orden todavía no existe', async () => {
+    vi.spyOn(Order.prototype, 'search').mockResolvedValue({ data: [] });
+    const obtener = vi.spyOn(Order.prototype, 'get');
+    await expect(new MercadoPagoApiGateway('TEST-token-de-prueba').consultarOrdenDePago(42, new Date())).resolves.toBeNull();
+    expect(obtener).not.toHaveBeenCalled();
   });
 
   it('con credenciales productivas no crea órdenes', async () => {
@@ -95,5 +105,25 @@ describe('Mercado Pago: credenciales de prueba de la API de Orders (prefijo APP_
     vi.spyOn(User.prototype, 'get').mockResolvedValue({ id: 1, nickname: 'TESTUSER987654321', tags: ['normal'] } as never);
     vi.spyOn(Order.prototype, 'create').mockResolvedValue(orden({ checkout_url: 'https://www.mercadopago.com.ar/checkout/v1/redirect?order_id=ORD01TEST' }));
     await expect(new MercadoPagoApiGateway('APP_USR-de-prueba').crearPago(solicitud)).resolves.toContain('order_id=ORD01TEST');
+  });
+});
+
+describe('Mercado Pago: errores de la API de Orders', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('la referencia externa usa solo caracteres que admite Orders (sin ":")', () => {
+    const body = armarOrdenCheckoutPro(solicitud, 'http://localhost:5173');
+    expect(body.external_reference).toBe('pago-42');
+    expect(body.external_reference).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(referenciaDePago(7)).toBe('pago-7');
+    // El formato anterior "pago:{id}" ya no se interpreta como un pago de NeuroGym.
+    expect(interpretarOrden(orden({ status: 'processed', external_reference: 'pago:42' }))).toBeNull();
+  });
+
+  it('si Mercado Pago rechaza la orden, responde 502 con un mensaje claro y sin exponer el token', async () => {
+    vi.spyOn(Order.prototype, 'create').mockRejectedValue({ name: 'MPBadRequestError', status: 400, error: '', causes: [] });
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(new MercadoPagoApiGateway('TEST-token-de-prueba').crearPago(solicitud)).rejects.toMatchObject({ status: 502, codigo: 'MP_ORDEN_RECHAZADA' });
+    expect(JSON.stringify(consola.mock.calls)).not.toContain('TEST-token-de-prueba');
   });
 });

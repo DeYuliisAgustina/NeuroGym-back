@@ -43,9 +43,9 @@ export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
     return this.respuestas.get(ordenId) ?? null;
   }
 
-  /** La orden de un pago se registra en el doble con la clave "pago:{id}", como su external_reference. */
+  /** La orden de un pago se registra en el doble con la clave "pago-{id}", como su external_reference. */
   async consultarOrdenDePago(pagoId: number): Promise<ResultadoOperacion | null> {
-    return this.respuestas.get(`pago:${pagoId}`) ?? null;
+    return this.respuestas.get(`pago-${pagoId}`) ?? null;
   }
 
   async consultarPreaprobacion(id: string): Promise<ResultadoOperacion | null> {

@@ -24,6 +24,20 @@ export function esCuentaDePrueba(usuario: { tags?: string[]; nickname?: string; 
 }
 
 /**
+ * external_reference de la orden de un pago de NeuroGym. La API de Orders solo
+ * admite letras, números, guion y guion bajo (rechaza "pago:42" con HTTP 400
+ * "does not match pattern"), por eso se usa "pago-42".
+ */
+export const referenciaDePago = (pagoId: number) => `pago-${pagoId}`;
+const REFERENCIA_PAGO = /^pago-(\d+)$/;
+
+/** Detalle seguro de un error de la API de Mercado Pago (sin credenciales). */
+function describirErrorMp(error: unknown) {
+  const e = error as { status?: number; name?: string; message?: string; causes?: unknown; errors?: unknown };
+  return { status: e?.status, tipo: e?.name, mensaje: e?.message, causas: e?.causes ?? e?.errors };
+}
+
+/**
  * Cuerpo de la orden de Checkout Pro (API de Orders). Para Checkout Pro la
  * documentación oficial exige type "online" y processing_mode "manual"; el
  * total debe coincidir con la suma de los ítems.
@@ -36,7 +50,7 @@ export function armarOrdenCheckoutPro(s: SolicitudPago, frontend: string): Creat
     processing_mode: 'manual',
     total_amount: importe(s.importe),
     // La referencia vincula la orden con el pago PENDIENTE de NeuroGym.
-    external_reference: `pago:${s.pagoId}`,
+    external_reference: referenciaDePago(s.pagoId),
     description: s.descripcion,
     items: [{ title: s.descripcion, unit_price: importe(s.importe), quantity: 1, external_code: `cuota-${s.pagoId}` }],
     config: {
@@ -59,9 +73,9 @@ export function armarOrdenCheckoutPro(s: SolicitudPago, frontend: string): Creat
  * action_required) no se registra nada: el comprador todavía puede reintentar.
  */
 export function interpretarOrden(orden: OrderResponse): ResultadoOperacion | null {
-  const ref = orden.external_reference ?? '';
-  if (!ref.startsWith('pago:')) return null;
-  const pagoId = Number(ref.slice(5));
+  const coincidencia = REFERENCIA_PAGO.exec(orden.external_reference ?? '');
+  if (!coincidencia) return null;
+  const pagoId = Number(coincidencia[1]);
   const pagos = orden.transactions?.payments ?? [];
   // Cada intento de cobro es un pago distinto dentro de la orden; se toma el último.
   const ultimo = pagos.at(-1);
@@ -109,11 +123,18 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
   async crearPago(s: SolicitudPago): Promise<string> {
     await this.verificarModoPrueba();
     const frontend = env.mercadoPago.urlRetornoPublica || env.frontendUrl.split(',')[0];
-    const orden = await new Order(this.config).create({
-      body: armarOrdenCheckoutPro(s, frontend),
-      // X-Idempotency-Key: un reintento de la misma solicitud no crea otra orden.
-      requestOptions: { idempotencyKey: `orden-pago-${s.pagoId}` },
-    });
+    let orden;
+    try {
+      orden = await new Order(this.config).create({
+        body: armarOrdenCheckoutPro(s, frontend),
+        // X-Idempotency-Key: un reintento de la misma solicitud no crea otra orden.
+        requestOptions: { idempotencyKey: `orden-pago-${s.pagoId}` },
+      });
+    } catch (error) {
+      // Se registra el detalle de la API (código y causas) para diagnosticar, nunca las credenciales.
+      if (env.nodeEnv !== 'test') console.error('[Mercado Pago] No se pudo crear la orden:', JSON.stringify(describirErrorMp(error)));
+      throw new ErrorApp(502, 'MP_ORDEN_RECHAZADA', 'Mercado Pago no pudo crear la orden de pago. Intentá nuevamente en unos minutos.');
+    }
     if (!orden.checkout_url) throw new ErrorApp(502, 'MP_SIN_CHECKOUT', 'Mercado Pago no devolvió la URL de pago de la orden');
     return orden.checkout_url;
   }
@@ -186,15 +207,17 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
     const dia = 86_400_000;
     const resultado = await new Order(this.config).search({
       options: {
-        external_reference: `pago:${pagoId}`,
+        external_reference: referenciaDePago(pagoId),
         begin_date: new Date(desde.getTime() - dia).toISOString(),
         end_date: new Date(Date.now() + dia).toISOString(),
         sort_by: 'created_date',
         sort_order: 'desc',
       },
     });
-    const orden = resultado.data?.find((o) => o.external_reference === `pago:${pagoId}`);
-    return orden ? interpretarOrden(orden) : null;
+    const orden = resultado.data?.find((o) => o.external_reference === referenciaDePago(pagoId));
+    if (!orden?.id) return null;
+    // La búsqueda no trae los pagos de la orden: se consulta completa (GET /v1/orders/{id}).
+    return this.consultarOrden(orden.id);
   }
 
   async consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null> {

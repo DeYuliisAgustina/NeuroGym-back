@@ -174,7 +174,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     // Orden todavía abierta: no se registra nada y la cuota sigue pendiente.
     const pendiente = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: body.pagoId });
     expect(pendiente.body).toMatchObject({ procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' });
-    doble.actual.respuestas.set(`pago:${body.pagoId}`, { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9002', aprobado: true });
+    doble.actual.respuestas.set(`pago-${body.pagoId}`, { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9002', aprobado: true });
     expect((await request(app).post('/api/pagos/confirmacion').set(conToken(otro.token)).send({ pagoId: body.pagoId })).status).toBe(404);
     const r = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: body.pagoId });
     expect(r.body).toMatchObject({ procesado: true, aprobado: true });
