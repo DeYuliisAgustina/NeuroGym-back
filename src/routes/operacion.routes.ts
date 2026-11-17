@@ -15,6 +15,8 @@ operacionRoutes.post('/cuotas/:id/pagos', autenticar, soloPerfiles('SOCIO'), cuo
 operacionRoutes.post('/pagos/webhook', cuotaController.webhook);
 operacionRoutes.post('/pagos/confirmacion', autenticar, soloPerfiles('SOCIO'), cuotaController.confirmarRetorno);
 operacionRoutes.get('/pagos/integracion', cuotaController.estadoIntegracion);
+// Regreso local de la autorización del débito automático (Mercado Pago no admite "localhost").
+operacionRoutes.get('/pagos/retorno-adhesion', cuotaController.retornoAdhesion);
 
 // CU-004: recepción QR del personal autorizado
 const recepcion = [autenticar, soloPerfiles('PERSONAL'), permiso('RECEPCION', 'CONSULTA')];

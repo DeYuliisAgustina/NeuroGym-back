@@ -31,6 +31,24 @@ export function esCuentaDePrueba(usuario: { tags?: string[]; nickname?: string; 
 export const referenciaDePago = (pagoId: number) => `pago-${pagoId}`;
 const REFERENCIA_PAGO = /^pago-(\d+)$/;
 
+/**
+ * back_url de la suscripción (débito automático). La API de Suscripciones rechaza
+ * el host "localhost" (HTTP 400 "Invalid value for back_url"), pero acepta
+ * 127.0.0.1. Sin URL pública, en desarrollo el regreso pasa por el backend
+ * (127.0.0.1), que redirige al frontend en el mismo origen donde el socio inició
+ * sesión, conservando el preapproval_id.
+ */
+export function urlRetornoAdhesion(publica = env.mercadoPago.urlRetornoPublica, puerto = env.puerto): string {
+  if (publica) return `${publica}/socio/pagos?resultado=adhesion`;
+  return `http://127.0.0.1:${puerto}/api/pagos/retorno-adhesion`;
+}
+
+/** Destino del regreso local: el frontend, solo con el id de la preaprobación (sin otros parámetros). */
+export function destinoRetornoAdhesion(preapprovalId: unknown, frontend = env.frontendUrl.split(',')[0]): string {
+  const id = typeof preapprovalId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(preapprovalId) ? preapprovalId : '';
+  return `${frontend}/socio/pagos?resultado=adhesion${id ? `&preapproval_id=${id}` : ''}`;
+}
+
 /** Detalle seguro de un error de la API de Mercado Pago (sin credenciales). */
 function describirErrorMp(error: unknown) {
   const e = error as { status?: number; name?: string; message?: string; causes?: unknown; errors?: unknown };
@@ -151,7 +169,7 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
         reason: s.descripcion,
         external_reference: `socio:${s.socioId}`,
         payer_email: pagador,
-        back_url: `${env.mercadoPago.urlRetornoPublica || env.frontendUrl.split(',')[0]}/socio/pagos?resultado=adhesion`,
+        back_url: urlRetornoAdhesion(),
         auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: s.importeMensual, currency_id: 'ARS' },
         status: 'pending',
       },

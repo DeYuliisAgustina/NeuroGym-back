@@ -1,6 +1,6 @@
 import { Order, User } from 'mercadopago';
 import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
-import { armarOrdenCheckoutPro, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway, referenciaDePago } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
+import { armarOrdenCheckoutPro, destinoRetornoAdhesion, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway, referenciaDePago, urlRetornoAdhesion } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
 
 const solicitud = { pagoId: 42, descripcion: 'Cuota NeuroGym 2026-11', importe: 44000, emailPagador: 'socio@prueba.local' };
 const orden = (datos: Partial<OrderResponse>) => ({ id: 'ORD01TEST', external_reference: 'pago-42', ...datos }) as OrderResponse;
@@ -105,6 +105,17 @@ describe('Mercado Pago: credenciales de prueba de la API de Orders (prefijo APP_
     vi.spyOn(User.prototype, 'get').mockResolvedValue({ id: 1, nickname: 'TESTUSER987654321', tags: ['normal'] } as never);
     vi.spyOn(Order.prototype, 'create').mockResolvedValue(orden({ checkout_url: 'https://www.mercadopago.com.ar/checkout/v1/redirect?order_id=ORD01TEST' }));
     await expect(new MercadoPagoApiGateway('APP_USR-de-prueba').crearPago(solicitud)).resolves.toContain('order_id=ORD01TEST');
+  });
+});
+
+describe('Mercado Pago: regreso de la autorización del débito automático', () => {
+  it('sin URL pública usa 127.0.0.1 (Suscripciones rechaza "localhost") y vuelve al frontend con el preapproval_id', () => {
+    expect(urlRetornoAdhesion('', 3000)).toBe('http://127.0.0.1:3000/api/pagos/retorno-adhesion');
+    expect(urlRetornoAdhesion('https://tunel.ejemplo.dev', 3000)).toBe('https://tunel.ejemplo.dev/socio/pagos?resultado=adhesion');
+    expect(destinoRetornoAdhesion('2c93808497', 'http://localhost:5173')).toBe('http://localhost:5173/socio/pagos?resultado=adhesion&preapproval_id=2c93808497');
+    // No reenvía valores arbitrarios.
+    expect(destinoRetornoAdhesion('x"><script>', 'http://localhost:5173')).toBe('http://localhost:5173/socio/pagos?resultado=adhesion');
+    expect(destinoRetornoAdhesion(['a', 'b'], 'http://localhost:5173')).toBe('http://localhost:5173/socio/pagos?resultado=adhesion');
   });
 });
 

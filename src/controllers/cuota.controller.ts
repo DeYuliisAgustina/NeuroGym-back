@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { cuotaService } from '../patterns/facade';
+import { destinoRetornoAdhesion } from '../integrations/mercadopago/MercadoPagoApiGateway';
 import { cobranzaService } from '../services/cobranza.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { aFechaDb } from '../utils/fechas';
@@ -81,6 +82,11 @@ export const cuotaController = {
   },
 
   /** Estado de la integración, visible en la defensa (sin datos sensibles). */
+  /** Regreso local de la autorización del débito: solo redirige al frontend (no registra nada). */
+  retornoAdhesion(req: Request, res: Response) {
+    res.redirect(302, destinoRetornoAdhesion(req.query.preapproval_id));
+  },
+
   async estadoIntegracion(_req: Request, res: Response) {
     res.json({ mercadoPago: cuotaService.modoIntegracion });
   },
