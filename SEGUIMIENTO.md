@@ -100,6 +100,53 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 | Almacenamiento | Fotos y videos de incidencias en carpeta local | Local | — | Proveedor S3 compatible | Almacenamiento en la nube |
 | Base de datos y servidores | PostgreSQL 18, backend y frontend locales | Local | — | — | Hosting |
 
+### Imputación de cuotas y conciliación de débitos: análisis previo (2026-11-17, sin implementar)
+
+**Pedido de la autora:**
+1. El débito automático paga la cuota del **período facturado**, no la deuda más antigua.
+2. Las cuotas vencidas anteriores siguen pendientes y se regularizan por separado.
+3. En el pago único y el efectivo se identifica qué cuota se abona.
+4. El 10 % se aplica solo al débito automático (RD6).
+5. Pagar una cuota posterior no cambia el estado de las anteriores.
+
+**Revisión del TFI (Word leído en modo solo lectura, sin modificarlo):**
+- **Lo que el TFI respalda:** CU-001 y CU-001-003 hablan de «la cuota del período» (precondición «tiene una cuota pendiente del período»). CU-001-001 muestra «el período, el estado de la cuota y la fecha de vencimiento». CU-001-007 genera el comprobante «con período». El diccionario define `cuota.periodo` ('AAAA-MM', «mes al que corresponde») con `UNIQUE (socio_id, periodo)`, y `pago.cuota_id` como «cuota abonada». RD6: el 10 % es exclusivo del débito. RD12: los nuevos precios rigen para pagos posteriores. CU-004-004 consulta «la cuota del período» y CU-004-005 advierte «con el período adeudado».
+- **Contradicciones con el pedido:** ninguna. Los puntos 1 a 5 son compatibles con el TFI.
+- **Diferencias de la implementación actual:**
+  - `cuotaRepository.cuotaActual` (la impaga más antigua) decide la cuota que ve el socio y la que cubre cada débito. Contradice los puntos 1 y 2.
+  - El socio solo ve una cuota y no puede elegir otra (punto 3). El backend ya recibe el id de la cuota en el pago único y en el efectivo, y la pantalla de Cobros del personal ya elige una cuota concreta.
+  - El punto 5 ya se cumple: ningún pago cambia otras cuotas.
+  - El punto 4 ya se cumple: la estrategia calcula el 10 % solo en `CobroDebitoAutomatico`.
+- **Situaciones que el TFI no define (requieren decisión antes de implementar):**
+  1. **Cómo se determina el período facturado de un débito.** Mercado Pago no informa un período: solo la fecha del débito (`debit_date`). Propuesta: el mes de esa fecha, en hora de Argentina.
+  2. **Fecha del débito y vencimiento.** Hoy Mercado Pago debita el mismo día del mes en que se autorizó (17/11 → 17/12), y las cuotas vencen el día 10 (decisión técnica previa). Un socio adherido el 17 quedaría `IMPAGA` del 10 al 17 de cada mes, con advertencia en el ingreso (RD8). Opciones: fijar el día de cobro de la suscripción (`billing_day` de Mercado Pago), no marcar `IMPAGA` a un socio adherido hasta que el débito falle, o aceptar la diferencia.
+  3. **Primer cobro al adherirse.** Mercado Pago cobra el primer mes en el acto (verificado). Si la cuota del período ya está pagada por otro medio, ese cobro no tiene cuota. Opción: iniciar la suscripción el mes siguiente (`start_date`) cuando la cuota del período ya esté pagada.
+  4. **Débito sobre una cuota ya pagada por otro medio** (doble cobro). Hoy queda en auditoría para devolución manual, como el pago único (`PAGO_SOBRE_CUOTA_PAGADA` / `DEBITO_SIN_CUOTA_PENDIENTE`). Falta definir también si, con la adhesión activa, el socio puede pagar la cuota del período por otro medio antes del débito.
+  5. **Débito antes de que exista la cuota del período.** Las cuotas se generan el día 1 a las 00:05. Propuesta técnica: generar la cuota del período al registrar el débito si todavía no existe (`generarCuotaSocio` ya es idempotente).
+  6. **Importe cobrado distinto del calculado.** El monto de la suscripción es fijo y Mercado Pago no lo actualiza solo (pendiente 3: actualizar el monto de la preaprobación cuando cambia un precio o el plan). Hoy `registrarDebito` guarda el importe calculado con los precios vigentes, no el que cobró Mercado Pago. Propuesta: guardar el importe realmente cobrado y dejar en auditoría la diferencia, sin ajustes automáticos.
+  7. **Cuota que se muestra por defecto** en «Cuotas y pagos»: propuesta, la del período en curso, con la lista de cuotas vencidas para elegir.
+  8. **Advertencia en el ingreso:** hoy advierte si hay cualquier cuota vencida impaga y lista los períodos. CU-004-004 menciona solo «la cuota del período». Propuesta: mantener la advertencia por cualquier período adeudado.
+  9. **Datos de prueba existentes:** el pago #76 (débito) quedó imputado a octubre. Propuesta: no tocarlo, porque su comprobante `NG-00000076` ya fue emitido (RD12) y se documenta como resultado de la regla anterior.
+
+**Conciliación periódica de débitos (evaluación):**
+- **Fuente:** `GET /authorized_payments/search?preapproval_id=…` (verificado en el entorno de prueba). Devuelve cada cobro con `id`, `status`, `debit_date`, `transaction_amount`, `retry_attempt` y `payment.status/status_detail`. Ya se usa al confirmar la adhesión (`consultarCobrosDeAdhesion`).
+- **Cuándo correría:**
+  - una tarea diaria en el programador existente (`node-cron`);
+  - al confirmar la adhesión (ya existe);
+  - a mano, con un script `npm run mp:conciliar` para pruebas y para la defensa.
+- **Alcance:** adhesiones `ACTIVA` y las `CANCELADA` en los últimos 35 días, porque puede haber un cobro anterior a la baja.
+- **Sin duplicados:**
+  - mismo camino que el webhook (`registrarResultado`);
+  - `referencia_externa` única `ap-{id}`;
+  - transacción con bloqueo de la cuota;
+  - captura de la colisión P2002 si un webhook y la conciliación llegan juntos.
+- **Error a corregir en el mismo cambio:** Mercado Pago reintenta un débito rechazado con el **mismo** `authorized_payment` (`retry_attempt`). Hoy, si el primer intento quedó `RECHAZADO` con la referencia `ap-{id}`, la aprobación del reintento se tomaría como duplicado y se perdería. Hay que permitir RECHAZADO → APROBADO para la misma referencia, como ya se hizo con las órdenes.
+- **Trazabilidad:**
+  - cada débito registrado deja en `auditoria` el origen (`WEBHOOK`, `RETORNO` o `CONCILIACION`), el id del cobro y del pago de Mercado Pago, el importe cobrado, la fecha del débito y el período imputado;
+  - cada corrida deja un resumen (adhesiones revisadas, registrados, duplicados, anomalías);
+  - las anomalías (cobro sin cuota del período o importe distinto) quedan en auditoría para revisión manual, sin cambios automáticos.
+- **Verificación posible en prueba:** con la adhesión 9 (cancelada, un cobro ya registrado), la conciliación tiene que encontrar el cobro y no duplicarlo. Un débito mensual real no se puede verificar sin esperar un ciclo: queda pendiente.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
@@ -133,5 +180,5 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **Mensajería a profesionales:** el modelo no guarda su teléfono; reciben las notificaciones en la plataforma.
 - **GESTION incluye CONSULTA** en la evaluación de permisos.
 - **Vencimiento de cuotas:** día 10 (`CUOTA_DIA_VENCIMIENTO`), no definido en el TFI.
-- **A qué cuota se imputa un pago (PENDIENTE DE DECISIÓN DE LA AUTORA, 2026-11-17).** El TFI habla siempre de «la cuota del período» (CU-001: precondición «tiene una cuota pendiente del período», paso 2 «la cuota del período»; CU-001-003 «la cuota del período está pendiente») y no define qué pasa con cuotas **anteriores** vencidas e impagas. La implementación (`cuotaRepository.cuotaActual`) toma la cuota **pendiente o impaga más antigua**, y si no hay ninguna, la más reciente. Esa misma cuota es la que muestra «Cuotas y pagos» y la que cubren el pago único, el efectivo y cada débito automático (`registrarDebito`). Por eso, en la prueba del 17/11, `socio5` (octubre y noviembre impagas) vio y pagó primero octubre, y el primer débito de la adhesión ($28.800, con 10 %) se imputó a **octubre de 2026**, no a noviembre. Consecuencias de esa regla: con dos cuotas atrasadas, el débito queda siempre un mes atrás (el próximo débito, 17/12, cubriría noviembre), y el 10 % se aplica también a una cuota vencida. No se cambió nada: hay que decidir si se mantiene, si todos los medios pagan la cuota del período en curso, o si solo el débito automático se imputa a la cuota del período.
+- **A qué cuota se imputa un pago (2026-11-17; la autora pidió imputar el débito al período facturado: ver «Imputación de cuotas y conciliación de débitos»).** El TFI habla siempre de «la cuota del período» (CU-001: precondición «tiene una cuota pendiente del período», paso 2 «la cuota del período»; CU-001-003 «la cuota del período está pendiente») y no define qué pasa con cuotas **anteriores** vencidas e impagas. La implementación (`cuotaRepository.cuotaActual`) toma la cuota **pendiente o impaga más antigua**, y si no hay ninguna, la más reciente. Esa misma cuota es la que muestra «Cuotas y pagos» y la que cubren el pago único, el efectivo y cada débito automático (`registrarDebito`). Por eso, en la prueba del 17/11, `socio5` (octubre y noviembre impagas) vio y pagó primero octubre, y el primer débito de la adhesión ($28.800, con 10 %) se imputó a **octubre de 2026**, no a noviembre. Consecuencias de esa regla: con dos cuotas atrasadas, el débito queda siempre un mes atrás (el próximo débito, 17/12, cubriría noviembre), y el 10 % se aplica también a una cuota vencida. No se cambió nada: hay que decidir si se mantiene, si todos los medios pagan la cuota del período en curso, o si solo el débito automático se imputa a la cuota del período.
 - **Alta de socios:** el gimnasio entrega una contraseña temporal que el socio puede cambiar (el TFI no define el mecanismo de primer acceso).
