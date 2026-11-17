@@ -61,3 +61,4 @@ administracionRoutes.get('/cuotas', permiso('COBROS', 'CONSULTA'), cuotaControll
 administracionRoutes.get('/cuotas/resumen', permiso('COBROS', 'CONSULTA'), cuotaController.resumen);
 administracionRoutes.post('/cuotas/:id/efectivo', permiso('COBROS', 'GESTION'), cuotaController.registrarEfectivo);
 administracionRoutes.get('/pagos/:id/comprobante', permiso('COBROS', 'CONSULTA'), cuotaController.comprobante);
+administracionRoutes.get('/pagos/:id/comprobante.pdf', permiso('COBROS', 'CONSULTA'), cuotaController.comprobantePdf);

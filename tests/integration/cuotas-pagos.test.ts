@@ -73,6 +73,27 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
 
     const comp = await request(app).get(`/api/socio/pagos/${pagoId}/comprobante`).set(conToken(socio.token));
     expect(comp.body).toMatchObject({ periodo: cuota.periodo, medio: 'PAGO_UNICO', descuento: 0, importe: 30000, referencia: 'MP-123' });
+
+    // «Descargar comprobante»: el mismo PDF que se envía por WhatsApp, con el mismo control de acceso.
+    expect(comp.body.rutaPdf).toBe(`/socio/pagos/${pagoId}/comprobante.pdf`);
+    const pdf = await request(app).get(`/api${comp.body.rutaPdf}`).set(conToken(socio.token)).buffer(true).parse((r, fin) => {
+        const partes: Buffer[] = [];
+        r.on('data', (p: Buffer) => partes.push(p));
+        r.on('end', () => fin(null, Buffer.concat(partes)));
+      });
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.headers['content-disposition']).toContain(`comprobante-${comp.body.numero}.pdf`);
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    const otroSocio = await crearSocio(g.sedeA.id);
+    expect((await request(app).get(`/api${comp.body.rutaPdf}`).set(conToken(otroSocio.token))).status).toBe(404);
+    const admin = await request(app).get(`/api/admin/pagos/${pagoId}/comprobante.pdf`).set(conToken(cobranzas.token)).buffer(true).parse((r, fin) => {
+        const partes: Buffer[] = [];
+        r.on('data', (p: Buffer) => partes.push(p));
+        r.on('end', () => fin(null, Buffer.concat(partes)));
+      });
+    expect(admin.status).toBe(200);
+    expect((await request(app).get(`/api/admin/pagos/${pagoId}/comprobante`).set(conToken(cobranzas.token))).body.rutaPdf).toBe(`/admin/pagos/${pagoId}/comprobante.pdf`);
     // Ya pagada: no admite iniciar otro pago.
     expect((await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' })).status).toBe(422);
   });

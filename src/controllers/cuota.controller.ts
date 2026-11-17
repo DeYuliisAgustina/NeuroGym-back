@@ -47,6 +47,15 @@ export const cuotaController = {
     const solicitante = usuario.tipo === 'SOCIO' ? { socioId: usuario.socioId! } : { gimnasioId: usuario.gimnasioId! };
     res.json(await cuotaService.obtenerComprobante(idParam(req.params.id), solicitante));
   },
+  /** Descarga del comprobante en PDF (socio titular o personal de su gimnasio). */
+  async comprobantePdf(req: Request, res: Response) {
+    const usuario = req.usuario!;
+    const solicitante = usuario.tipo === 'SOCIO' ? { socioId: usuario.socioId! } : { gimnasioId: usuario.gimnasioId! };
+    const pdf = await cuotaService.pdfComprobante(idParam(req.params.id), solicitante);
+    res
+      .set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdf.nombre}"`, 'Cache-Control': 'no-store, private' })
+      .send(pdf.contenido);
+  },
   async cancelarDebito(req: Request, res: Response) {
     res.json(await cuotaService.cancelarAdhesion(socioDe(req).socioId));
   },

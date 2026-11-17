@@ -11,7 +11,7 @@ import type { ServicioMensajeria } from '../../integrations/mensajeria';
 import { cuotaRepository } from '../../repositories/cuota.repository';
 import { registrarAuditoria } from '../../services/auditoria.service';
 import { generarCuotaSocio } from '../../services/cuotaGeneracion.service';
-import { dinero, mesAnio } from '../../services/comprobantePdf.service';
+import { dinero, mesAnio, pdfDeComprobante } from '../../services/comprobantePdf.service';
 import { crearServicioEnvios, type ServicioEnvios } from '../../services/envioMensajes.service';
 import { notificacionService } from '../../services/notificacion.service';
 import { preciosParaSocio } from '../../services/precios.service';
@@ -108,6 +108,15 @@ export class CuotaService {
     return cuotaRepository.listarPagos(socioId, filtros);
   }
 
+  /** CU-001-009: PDF del comprobante (el mismo que se envía por WhatsApp), con el mismo control de acceso. */
+  async pdfComprobante(pagoId: number, solicitante: Solicitante) {
+    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    if (!pago || !pago.comprobante || !this.puedeVer(pago.cuota, solicitante)) throw noEncontrado('Comprobante');
+    const pdf = await pdfDeComprobante(pagoId);
+    if (!pdf) throw noEncontrado('Comprobante');
+    return pdf;
+  }
+
   async obtenerComprobante(pagoId: number, solicitante: Solicitante) {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
     if (!pago || !pago.comprobante || !this.puedeVer(pago.cuota, solicitante)) throw noEncontrado('Comprobante');
@@ -119,6 +128,9 @@ export class CuotaService {
     const confirmado = envioWhatsapp && ['ENVIADO', 'ENTREGADO', 'LEIDO'].includes(envioWhatsapp.estado);
     // RD12: el comprobante muestra los importes congelados al momento del pago.
     return {
+      pagoId: pago.id,
+      // Descarga del mismo PDF que se envía por WhatsApp, según quién consulta.
+      rutaPdf: 'socioId' in solicitante ? `/socio/pagos/${pago.id}/comprobante.pdf` : `/admin/pagos/${pago.id}/comprobante.pdf`,
       numero: pago.comprobante.numero,
       fechaEmision: pago.comprobante.fechaEmision,
       fechaEnvio: confirmado ? pago.comprobante.fechaEnvio : null,

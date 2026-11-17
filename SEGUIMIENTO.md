@@ -33,7 +33,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 ### Pruebas ejecutadas (2026-11-17)
 
 - Backend `npm test`: **166 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación) y las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado).
-- Frontend `npm test`: **23 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
+- Frontend `npm test`: **24 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
 
@@ -356,7 +356,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - El PDF solo se puede enviar mientras haya una URL HTTPS pública que WhatsApp pueda descargar (túnel en desarrollo). Al cerrar el túnel se vacía `WHATSAPP_URL_PUBLICA`.
 - El enlace vence a los 15 minutos. WhatsApp lo descarga al enviar y después el archivo queda en la conversación.
 - Cada documento cuenta para el límite de 25 mensajes de la clave del sandbox.
-- El botón «Descargar comprobante» de la aplicación sigue generando el archivo HTML de antes. No se cambió porque no fue pedido.
+- **Descarga unificada (pedido de la autora, 2026-11-17):** el botón «Descargar comprobante» ahora baja **el mismo PDF** que se envía por WhatsApp. Las rutas son `GET /api/socio/pagos/{id}/comprobante.pdf` (socio titular) y `GET /api/admin/pagos/{id}/comprobante.pdf` (personal con permiso COBROS, consulta), con el mismo control de acceso que el comprobante. Reemplaza al archivo HTML anterior. Verificado contra el backend en ejecución: socio4 descarga `comprobante-NG-00000077.pdf`; otro socio recibe 404 y sin sesión, 401. Pruebas automáticas: backend 166 y frontend 24.
 
 ### Pendiente
 
