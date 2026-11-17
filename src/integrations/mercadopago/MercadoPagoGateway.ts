@@ -55,4 +55,6 @@ export interface MercadoPagoGateway {
   consultarOrdenDePago(pagoId: number, desde: Date): Promise<ResultadoOperacion | null>;
   /** Consulta una preaprobación por su id (retorno de la autorización del débito). */
   consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null>;
+  /** Cobros ya resueltos (aprobados o rechazados) de una suscripción, para no depender solo del webhook. */
+  consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<ResultadoOperacion[]>;
 }

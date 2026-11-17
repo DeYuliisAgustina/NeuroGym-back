@@ -139,6 +139,31 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(baja.body.estado).toBe('CANCELADA');
   });
 
+  it('débito: el primer cobro hecho al autorizar se registra al confirmar la adhesión aunque no llegue su webhook', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
+    const adhesion = { tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-SYNC', autorizada: true } as const;
+    doble.actual.respuestas.set('PRE-SYNC', adhesion);
+    doble.actual.cobros.set('PRE-SYNC', [{ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true }]);
+    const enviadosAntes = mensajeria.enviados.length;
+
+    const retorno = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ preapprovalId: 'PRE-SYNC' });
+    expect(retorno.body).toMatchObject({ procesado: true, autorizada: true });
+    const pagada = await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } });
+    expect(pagada.estado).toBe('PAGADA');
+    expect(Number(pagada.importeFinal)).toBe(27000);
+    expect(await prisma.comprobante.count({ where: { pago: { cuotaId: cuota.id } } })).toBe(1);
+    expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
+
+    // Regreso repetido y webhook tardío del mismo cobro: nada se duplica.
+    await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ preapprovalId: 'PRE-SYNC' });
+    const tardio = await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true });
+    expect(tardio.duplicado).toBe(true);
+    expect(await prisma.pago.count({ where: { cuotaId: cuota.id } })).toBe(1);
+    expect(await prisma.adhesionDebito.count({ where: { socioId: socio.id } })).toBe(1);
+    expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
+  });
+
   it('RF19: pago en efectivo registrado por personal autorizado con responsable', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });

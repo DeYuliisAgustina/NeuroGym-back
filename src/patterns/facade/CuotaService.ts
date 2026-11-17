@@ -223,7 +223,11 @@ export class CuotaService {
    */
   async registrarResultado(op: ResultadoOperacion): Promise<{ procesado: boolean; pagoId?: number; duplicado?: boolean }> {
     try {
-      if (op.tipo === 'ADHESION') return await this.registrarAdhesion(op);
+      if (op.tipo === 'ADHESION') {
+        const adhesion = await this.registrarAdhesion(op);
+        if (op.autorizada) await this.sincronizarCobrosDeAdhesion(op.idPreaprobacion);
+        return adhesion;
+      }
       const pagoAprobado = op.tipo === 'PAGO' ? await this.registrarPagoUnico(op) : await this.registrarDebito(op);
       if (pagoAprobado.pagoId && pagoAprobado.aprobado) await this.enviarComprobante(pagoAprobado.pagoId);
       return { procesado: pagoAprobado.procesado, pagoId: pagoAprobado.pagoId, duplicado: pagoAprobado.duplicado };
@@ -263,6 +267,22 @@ export class CuotaService {
       await this.confirmarPago(tx, pago.id, this.estrategias.PAGO_UNICO.calcularImporte(precios));
       return { procesado: true, pagoId: pago.id, aprobado: true };
     });
+  }
+
+  /**
+   * Registra los cobros ya resueltos de la suscripción (por ejemplo, el primer
+   * débito que Mercado Pago hace al autorizar) por el mismo camino idempotente
+   * del webhook. Una falla de consulta no deshace la adhesión.
+   */
+  private async sincronizarCobrosDeAdhesion(idPreaprobacion: string) {
+    let cobros: ResultadoOperacion[];
+    try {
+      cobros = await this.gateway.consultarCobrosDeAdhesion(idPreaprobacion);
+    } catch (error) {
+      console.warn('[Mercado Pago] No se pudieron consultar los cobros de la adhesión:', (error as Error).message);
+      return;
+    }
+    for (const cobro of cobros) await this.registrarResultado(cobro);
   }
 
   private async registrarDebito(op: Extract<ResultadoOperacion, { tipo: 'DEBITO' }>) {

@@ -107,6 +107,21 @@ export function interpretarOrden(orden: OrderResponse): ResultadoOperacion | nul
   return { tipo: 'PAGO', pagoId, referenciaExterna: String(ultimo?.id ?? orden.id), aprobado: aprobada };
 }
 
+/** Cobro de una suscripción (authorized_payment) según la API REST de Mercado Pago. */
+export interface CobroRecurrente {
+  id: number;
+  preapproval_id: string;
+  status: string;
+  payment?: { status?: string };
+}
+
+/** Solo los cobros resueltos generan un resultado; los programados o en proceso, no. */
+export function interpretarCobroRecurrente(cobro: CobroRecurrente): ResultadoOperacion | null {
+  const estado = cobro.payment?.status ?? cobro.status;
+  if (estado !== 'approved' && estado !== 'rejected') return null;
+  return { tipo: 'DEBITO', idPreaprobacion: cobro.preapproval_id, referenciaExterna: `ap-${cobro.id}`, aprobado: estado === 'approved' };
+}
+
 /**
  * Integración con la API oficial de Mercado Pago (SDK `mercadopago`) en el
  * ENTORNO DE PRUEBA de Mercado Pago Developers. Antes de operar verifica que
@@ -277,9 +292,21 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
       headers: { Authorization: `Bearer ${this.accessToken}` },
     });
     if (!respuesta.ok) return null;
-    const cobro = (await respuesta.json()) as { id: number; preapproval_id: string; status: string; payment?: { status?: string } };
-    const estado = cobro.payment?.status ?? cobro.status;
-    if (estado !== 'approved' && estado !== 'rejected') return null;
-    return { tipo: 'DEBITO', idPreaprobacion: cobro.preapproval_id, referenciaExterna: `ap-${cobro.id}`, aprobado: estado === 'approved' };
+    return interpretarCobroRecurrente((await respuesta.json()) as CobroRecurrente);
+  }
+
+  /**
+   * Cobros de una suscripción (GET /authorized_payments/search). Verificado en el
+   * entorno de prueba: al autorizar, Mercado Pago cobra el primer mes en el acto
+   * y el webhook de ese cobro puede no llegar; así no queda un cobro sin registrar.
+   */
+  async consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<ResultadoOperacion[]> {
+    await this.verificarModoPrueba();
+    const respuesta = await fetch(`https://api.mercadopago.com/authorized_payments/search?preapproval_id=${encodeURIComponent(idPreaprobacion)}`, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+    if (!respuesta.ok) return [];
+    const { results = [] } = (await respuesta.json()) as { results?: CobroRecurrente[] };
+    return results.map(interpretarCobroRecurrente).filter((r): r is ResultadoOperacion => r !== null);
   }
 }

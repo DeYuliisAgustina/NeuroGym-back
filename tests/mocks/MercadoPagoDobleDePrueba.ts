@@ -51,4 +51,11 @@ export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
   async consultarPreaprobacion(id: string): Promise<ResultadoOperacion | null> {
     return this.respuestas.get(id) ?? null;
   }
+
+  /** Cobros de cada suscripción, por id de preaprobación. */
+  readonly cobros = new Map<string, ResultadoOperacion[]>();
+
+  async consultarCobrosDeAdhesion(id: string): Promise<ResultadoOperacion[]> {
+    return this.cobros.get(id) ?? [];
+  }
 }

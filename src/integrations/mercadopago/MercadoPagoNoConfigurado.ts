@@ -34,4 +34,7 @@ export class MercadoPagoNoConfigurado implements MercadoPagoGateway {
   async consultarPreaprobacion(): Promise<ResultadoOperacion | null> {
     throw sinConfigurar();
   }
+  async consultarCobrosDeAdhesion(): Promise<ResultadoOperacion[]> {
+    throw sinConfigurar();
+  }
 }
