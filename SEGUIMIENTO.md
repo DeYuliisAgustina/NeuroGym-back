@@ -32,7 +32,8 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **172 pruebas aprobadas** (2026-11-20; unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación), las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado) y las de errores HTTP de los middlewares (`tests/integration/errores-http.test.ts`).
+- Backend `npm test`: **180 pruebas aprobadas** (2026-11-20; unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación), las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado), el test de caja blanca y las de errores HTTP de los middlewares (`tests/integration/errores-http.test.ts`).
+- **Test de caja blanca (punto 10.5.10 del TFI):** `tests/unit/caja-blanca.test.ts` prueba `detectarSenal` (CU-002-003) con el criterio de cubrimiento de flechas. El grafo de flujo de control tiene 19 nodos y 21 flechas (7 decisiones); los 7 casos del set recorren las 21 flechas y una octava prueba lo verifica. Con `npx vitest run tests/unit/caja-blanca.test.ts --coverage --coverage.include=src/jobs/reglasRetencion.ts --coverage.reporter=text`, V8 informa 100 % de ramas (las líneas 71-87 sin cubrir son de `estimarRiesgo`, fuera del alcance). El texto del 10.5.10 (patrones con su implementación y el test de caja blanca) está en `DesktopTesisNeurogym.5.10 Casos de prueba`; el Word del TFI no se modificó.
 - Frontend `npm test`: **24 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
