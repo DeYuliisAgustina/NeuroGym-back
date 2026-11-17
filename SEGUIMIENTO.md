@@ -24,7 +24,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 | Seguridad (JWT, bcrypt, accesos separados, Composite, aislamiento multiempresa, auditoría) | `tests/integration/seguridad.test.ts` (12) + `tests/unit/composite.test.ts` (6) |
 | Turnos y reservas (cupos concurrentes, RD18, RD21, RD23 con disparador) | `turnos-asistencia.test.ts` |
 | Asistencia QR (CU-004: QR firmado y vencido, reserva/sede/horario, duplicado, cuota impaga con autorizar/bloquear, manual y provisoria, día de constancia) | `turnos-asistencia.test.ts` (13 en total) + `reglas.test.ts` |
-| Cuotas y pagos (CU-001: Facade, Strategy, webhook idempotente, rechazo, falla de WhatsApp, débito con 10 %, efectivo, RD12) | `cuotas-pagos.test.ts` (11) + `strategy.test.ts` (9) |
+| Cuotas y pagos (CU-001: Facade, Strategy, webhook idempotente, rechazo, falla de WhatsApp, débito con 10 %, efectivo, RD12) | `cuotas-pagos.test.ts` (11) + `strategy.test.ts` (9) + `mercadopago.test.ts` (4) + `mercadopago-orders.test.ts` (6). La API real de Mercado Pago todavía no se probó (ver Pendiente) |
 | Entrenamiento (CU-003: rutina simulada, reemplazo, edición, variante, entrenamiento) y equipamiento (RD22) | `entrenamiento-retencion.test.ts` |
 | Retención (CU-002: ETL, señales, estimaciones solo Intelligence, propuesta con aprobación y bonificación Premium, xlsx, canjes) | `entrenamiento-retencion.test.ts` (10 en total) + `reglas.test.ts` |
 | Marketplace (Observer CREADO/REPROGRAMADO/CANCELADO, RD16, comisión 8 %, Fundadores, .ics) | `marketplace.test.ts` (8) + `observer.test.ts` (5) |
@@ -32,7 +32,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **114 pruebas aprobadas** (unitarias y de integración con PostgreSQL).
+- Backend `npm test`: **120 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas 6 nuevas de la API de Orders.
 - Frontend `npm test`: **18 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
@@ -44,9 +44,26 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 - Las cuotas vencidas no pasaban a IMPAGA si el servidor no estaba encendido a la hora de la tarea diaria: se agregó `ponerAlDia()` al iniciar (con `CRON_ENABLED=true`) y en el seed.
 - pgAdmin ejecuta el editor en una transacción y `CREATE DATABASE` no se admite: el script de rol quedó solo con `CREATE ROLE`; las bases las crea el rol `neurogym`.
 
+### Mercado Pago: pago único con la API de Orders (2026-11-17)
+
+Mercado Pago marca la API de Preferences como camino no recomendado (sin fecha de baja publicada) y las funciones nuevas salen solo en la API de Orders. Como NeuroGym no tiene pagos reales, el pago único se adaptó a **Checkout Pro vía Orders** con el mismo SDK (`mercadopago` 3.6.1, cliente `Order`).
+
+- **Cambió:** `MercadoPagoApiGateway` crea la orden (`POST /v1/orders`, `type: online`, `processing_mode: manual`, `external_reference: pago:{id}`, clave de idempotencia) y redirige con `checkout_url`; el webhook atiende el evento `order` y consulta `GET /v1/orders/{id}`; el retorno llega a `/socio/pagos?resultado=...&pago={id}` y el backend busca la orden por su referencia (verificando que el pago sea del socio). Estados: `processed`/`accredited` = aprobado; `failed` y `canceled` = rechazado; `created`, `processing` y `action_required` = todavía sin registrar. Se guarda como referencia el id del último pago de la orden.
+- **No cambió:** reglas de negocio, importes (pago único a precio de lista, 10 % solo por débito automático), `CobroPagoUnico` (Strategy), `registrarResultado` (Facade), comprobantes, WhatsApp, idempotencia, efectivo y el **débito automático con Suscripciones (PreApproval)**, que sigue independiente.
+- **Configuración en Mercado Pago Developers (la hace la autora):** aplicación Checkout Pro con **API de Orders**; cuentas de prueba vendedora y compradora; Access Token de la vendedora de prueba en `MP_ACCESS_TOKEN` (el backend acepta credenciales `TEST-` o de un usuario de prueba y rechaza las productivas); webhooks en modo Prueba con los eventos **Order (Mercado Pago)** y **Planes y suscripciones** en `/api/pagos/webhook`; clave en `MP_WEBHOOK_SECRET`; correo de la compradora en `MP_TEST_PAYER_EMAIL`. Las credenciales quedan solo en `.env`, que Git ignora.
+
 ### Pendiente
 
-1. Credenciales de prueba de Mercado Pago (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` y una URL pública para el webhook), WhatsApp Cloud API y Claude (`ANTHROPIC_API_KEY`) para verificar las integraciones reales; hoy funcionan sus simulaciones.
+1. **Probar Mercado Pago con credenciales de prueba.** Nada de esto está verificado contra la API real:
+   - pago único aprobado (titular APRO) y rechazado (OTHE): creación de la orden, `checkout_url`, retorno, búsqueda de la orden y comprobante;
+   - webhook `order` firmado y reenviado sin duplicar, y que la búsqueda por `external_reference` responda en el entorno de prueba;
+   - débito automático: adhesión con la cuenta compradora, importe con 10 % y baja. Mercado Pago no garantiza cobros mensuales en prueba; si no se generan, queda documentado como no verificado;
+   - URL HTTPS para el webhook (túnel de desarrollo).
+   - WhatsApp Cloud API y Claude (`ANTHROPIC_API_KEY`) solo funcionan simulados; falta verificarlos con credenciales.
+   - **Funcionalidades no verificadas por completo (no se dan por terminadas):**
+     - NeuroGym Intelligence: la estimación de riesgo es un puntaje por reglas (caída de frecuencia, ausencia, cuota impaga), no un modelo entrenado; revisar contra el TFI. La retención mensual en porcentaje no se calcula. ETL, señales, Excel y propuestas tienen pruebas automáticas; en el navegador no se guardó ninguna decisión.
+     - Consultas profesionales: solicitud, confirmación, rechazo, reprogramación, cancelación, comisión y .ics probados en el backend; no ejercitados en el navegador (el profesional del seed no tiene consultas). El profesional recibe avisos solo en la plataforma.
+     - Interfaz: selector de medios de pago con cuota pendiente, lectura de QR con cámara real e instalación como PWA, sin verificar en el navegador. La recuperación de contraseña no está implementada.
 2. Almacenamiento de objetos en un proveedor S3 compatible (hoy, carpeta local).
 3. Actualizar el monto de las preaprobaciones de débito cuando cambia un precio.
 4. Apartado 10.5.10 del TFI (casos de prueba) a partir de las funciones reales: `verificarReservaVigente`, `CuotaService.registrarResultado`, `detectarSenal`/`estimarRiesgo`, `validarRutinaGenerada`.

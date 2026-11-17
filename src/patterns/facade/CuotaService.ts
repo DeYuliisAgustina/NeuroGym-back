@@ -196,15 +196,16 @@ export class CuotaService {
   }
 
   /**
-   * Retorno desde Checkout Pro: con el payment_id que devuelve Mercado Pago se
-   * consulta el pago en la API oficial (no se confía en los parámetros de la URL)
-   * y se registra por el mismo camino idempotente que el webhook.
+   * Retorno desde Checkout Pro: la URL de retorno trae el id interno del pago;
+   * se verifica que pertenezca al socio, se consulta su orden en la API oficial
+   * de Orders (no se confía en los parámetros de la URL) y se registra por el
+   * mismo camino idempotente que el webhook.
    */
-  async confirmarRetornoPago(paymentId: string, socioId: number) {
-    const resultado = await this.gateway.consultarPago(paymentId);
-    if (!resultado || resultado.tipo !== 'PAGO') return { procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' };
-    const pago = await prisma.pago.findUnique({ where: { id: resultado.pagoId }, include: { cuota: true } });
-    if (!pago || pago.cuota.socioId !== socioId) throw noEncontrado('Pago');
+  async confirmarRetornoPago(pagoId: number, socioId: number) {
+    const pago = await prisma.pago.findUnique({ where: { id: pagoId }, include: { cuota: true } });
+    if (!pago || pago.medio !== 'PAGO_UNICO' || pago.cuota.socioId !== socioId) throw noEncontrado('Pago');
+    const resultado = await this.gateway.consultarOrdenDePago(pagoId, pago.fecha);
+    if (!resultado || resultado.tipo !== 'PAGO' || resultado.pagoId !== pagoId) return { procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' };
     return { ...(await this.registrarResultado(resultado)), aprobado: resultado.aprobado };
   }
 

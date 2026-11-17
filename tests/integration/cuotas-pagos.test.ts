@@ -151,29 +151,35 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(r.status).toBe(401);
   });
 
-  it('webhook firmado: consulta el pago, lo registra y es idempotente ante reenvíos', async () => {
+  it('webhook firmado de una orden (Order): consulta la orden, la registra y es idempotente ante reenvíos', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
     const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    expect(body.url).toContain('https://');
     doble.actual.firmaValida = true;
-    doble.actual.respuestas.set('9001', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: '9001', aprobado: true });
-    const notificacion = { type: 'payment', action: 'payment.updated', data: { id: '9001' } };
-    expect((await request(app).post('/api/pagos/webhook').query({ 'data.id': '9001', type: 'payment' }).send(notificacion)).body.procesado).toBe(true);
-    expect((await request(app).post('/api/pagos/webhook').query({ 'data.id': '9001', type: 'payment' }).send(notificacion)).body.duplicado).toBe(true);
+    doble.actual.respuestas.set('ORD01TEST9001', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9001', aprobado: true });
+    const notificacion = { type: 'order', action: 'order.processed', data: { id: 'ORD01TEST9001' } };
+    const webhook = () => request(app).post('/api/pagos/webhook').query({ 'data.id': 'ORD01TEST9001', type: 'order' }).send(notificacion);
+    expect((await webhook()).body.procesado).toBe(true);
+    expect((await webhook()).body.duplicado).toBe(true);
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
-    expect(await prisma.pago.count({ where: { referenciaExterna: '9001' } })).toBe(1);
+    expect(await prisma.pago.count({ where: { referenciaExterna: 'PAY01TEST9001' } })).toBe(1);
   });
 
-  it('retorno de Checkout Pro: confirma consultando el pago y no acepta pagos ajenos', async () => {
+  it('retorno de Checkout Pro: confirma buscando la orden del pago y no acepta pagos ajenos', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const otro = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
     const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
-    doble.actual.respuestas.set('9002', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: '9002', aprobado: true });
-    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(otro.token)).send({ paymentId: '9002' })).status).toBe(404);
-    const r = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ paymentId: '9002' });
+    // Orden todavía abierta: no se registra nada y la cuota sigue pendiente.
+    const pendiente = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: body.pagoId });
+    expect(pendiente.body).toMatchObject({ procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' });
+    doble.actual.respuestas.set(`pago:${body.pagoId}`, { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9002', aprobado: true });
+    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(otro.token)).send({ pagoId: body.pagoId })).status).toBe(404);
+    const r = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: body.pagoId });
     expect(r.body).toMatchObject({ procesado: true, aprobado: true });
-    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ paymentId: 'abc' })).status).toBe(400);
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
+    expect((await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: 'abc' })).status).toBe(400);
   });
 
   it('la cuota del período se genera al dar de alta al socio', async () => {

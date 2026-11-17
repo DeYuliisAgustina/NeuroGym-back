@@ -20,8 +20,8 @@ describe('Integración Mercado Pago (sin red)', () => {
   const gateway = new MercadoPagoApiGateway('TEST-token-de-prueba');
   const notificacion = (firma: string, dataId = '123456789') => ({
     encabezados: { 'x-signature': firma, 'x-request-id': 'req-1' },
-    query: { 'data.id': dataId, type: 'payment' },
-    cuerpo: { type: 'payment', data: { id: dataId } },
+    query: { 'data.id': dataId, type: 'order' },
+    cuerpo: { type: 'order', data: { id: dataId } },
   });
 
   it('acepta la firma calculada con el secreto de la aplicación (validador oficial del SDK)', () => {

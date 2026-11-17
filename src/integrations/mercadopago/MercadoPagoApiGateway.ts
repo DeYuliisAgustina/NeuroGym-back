@@ -1,4 +1,6 @@
-import { MercadoPagoConfig, Payment, PreApproval, Preference, User, WebhookSignatureValidator } from 'mercadopago';
+import { MercadoPagoConfig, Order, PreApproval, User, WebhookSignatureValidator } from 'mercadopago';
+import type { CreateOrderRequest } from 'mercadopago/dist/clients/order/create/types';
+import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
 import { env } from '../../config/env';
 import { ErrorApp } from '../../utils/errores';
 import type {
@@ -10,6 +12,55 @@ import type {
 } from './MercadoPagoGateway';
 
 const valor = (v: unknown) => (Array.isArray(v) ? v[0] : v) as string | undefined;
+const importe = (n: number) => n.toFixed(2);
+
+/**
+ * Cuerpo de la orden de Checkout Pro (API de Orders). Para Checkout Pro la
+ * documentación oficial exige type "online" y processing_mode "manual"; el
+ * total debe coincidir con la suma de los ítems.
+ */
+export function armarOrdenCheckoutPro(s: SolicitudPago, frontend: string): CreateOrderRequest {
+  // El id interno del pago viaja en la URL de retorno para confirmar sin depender de parámetros de Mercado Pago.
+  const retorno = (resultado: string) => `${frontend}/socio/pagos?resultado=${resultado}&pago=${s.pagoId}`;
+  return {
+    type: 'online',
+    processing_mode: 'manual',
+    total_amount: importe(s.importe),
+    // La referencia vincula la orden con el pago PENDIENTE de NeuroGym.
+    external_reference: `pago:${s.pagoId}`,
+    description: s.descripcion,
+    items: [{ title: s.descripcion, unit_price: importe(s.importe), quantity: 1, external_code: `cuota-${s.pagoId}` }],
+    config: {
+      statement_descriptor: 'NEUROGYM',
+      online: {
+        success_url: retorno('aprobado'),
+        failure_url: retorno('rechazado'),
+        pending_url: retorno('pendiente'),
+        // Mercado Pago solo acepta el regreso automático hacia URLs públicas (HTTPS).
+        ...(frontend.startsWith('https://') ? { auto_return: 'approved' as const } : {}),
+      },
+    },
+  };
+}
+
+/**
+ * Traduce el estado de una orden de Checkout Pro al resultado de NeuroGym
+ * (estados oficiales: processed/accredited = aprobada; failed y canceled =
+ * rechazada). Mientras la orden sigue abierta (created, processing,
+ * action_required) no se registra nada: el comprador todavía puede reintentar.
+ */
+export function interpretarOrden(orden: OrderResponse): ResultadoOperacion | null {
+  const ref = orden.external_reference ?? '';
+  if (!ref.startsWith('pago:')) return null;
+  const pagoId = Number(ref.slice(5));
+  const pagos = orden.transactions?.payments ?? [];
+  // Cada intento de cobro es un pago distinto dentro de la orden; se toma el último.
+  const ultimo = pagos.at(-1);
+  const aprobada = orden.status === 'processed' && (orden.status_detail ?? 'accredited') === 'accredited';
+  const rechazada = orden.status === 'failed' || orden.status === 'canceled';
+  if (!aprobada && !rechazada) return null;
+  return { tipo: 'PAGO', pagoId, referenciaExterna: String(ultimo?.id ?? orden.id), aprobado: aprobada };
+}
 
 /**
  * Integración con la API oficial de Mercado Pago (SDK `mercadopago`) en el
@@ -43,27 +94,17 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
     return this.verificacion;
   }
 
+  /** Pago único: orden de Checkout Pro mediante la API de Orders (POST /v1/orders). */
   async crearPago(s: SolicitudPago): Promise<string> {
     await this.verificarModoPrueba();
     const frontend = env.mercadoPago.urlRetornoPublica || env.frontendUrl.split(',')[0];
-    const preferencia = await new Preference(this.config).create({
-      body: {
-        items: [{ id: `cuota-${s.pagoId}`, title: s.descripcion, quantity: 1, unit_price: s.importe, currency_id: 'ARS' }],
-        // La referencia vincula el pago de Mercado Pago con el pago PENDIENTE de NeuroGym.
-        external_reference: `pago:${s.pagoId}`,
-        back_urls: {
-          success: `${frontend}/socio/pagos?resultado=aprobado`,
-          failure: `${frontend}/socio/pagos?resultado=rechazado`,
-          pending: `${frontend}/socio/pagos?resultado=pendiente`,
-        },
-        // Mercado Pago solo acepta el regreso automático hacia URLs públicas (HTTPS).
-        ...(frontend.startsWith('https://') ? { auto_return: 'approved' } : {}),
-        statement_descriptor: 'NEUROGYM',
-      },
-      requestOptions: { idempotencyKey: `preferencia-pago-${s.pagoId}` },
+    const orden = await new Order(this.config).create({
+      body: armarOrdenCheckoutPro(s, frontend),
+      // X-Idempotency-Key: un reintento de la misma solicitud no crea otra orden.
+      requestOptions: { idempotencyKey: `orden-pago-${s.pagoId}` },
     });
-    // En el entorno de prueba se usa la URL de sandbox cuando la API la informa.
-    return preferencia.sandbox_init_point ?? preferencia.init_point!;
+    if (!orden.checkout_url) throw new ErrorApp(502, 'MP_SIN_CHECKOUT', 'Mercado Pago no devolvió la URL de pago de la orden');
+    return orden.checkout_url;
   }
 
   async crearDebito(s: SolicitudDebito): Promise<string> {
@@ -109,25 +150,40 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
   }
 
   async interpretarNotificacion({ query, cuerpo }: NotificacionEntrante): Promise<ResultadoOperacion | null> {
-    const body = (cuerpo ?? {}) as { type?: string; data?: { id?: string } };
+    const body = (cuerpo ?? {}) as { type?: string; live_mode?: boolean; data?: { id?: string } };
+    // Defensa adicional: nunca se procesa una notificación de un pago real.
+    if (body.live_mode === true) return null;
     const tipo = body.type ?? String(query.type ?? query.topic ?? '');
     const id = String(body.data?.id ?? query['data.id'] ?? query.id ?? '');
     if (!id) return null;
-    if (tipo === 'payment') return this.consultarPago(id);
+    // Pago único: evento "Order (Mercado Pago)". Débito automático: eventos de Suscripciones.
+    if (tipo === 'order') return this.consultarOrden(id);
     if (tipo === 'subscription_preapproval') return this.consultarPreaprobacion(id);
     if (tipo === 'subscription_authorized_payment') return this.consultarCobroRecurrente(id);
     return null;
   }
 
-  async consultarPago(paymentId: string): Promise<ResultadoOperacion | null> {
+  /** GET /v1/orders/{id}: el resultado se toma siempre de la API oficial, no de la notificación. */
+  async consultarOrden(ordenId: string): Promise<ResultadoOperacion | null> {
     await this.verificarModoPrueba();
-    const pago = await new Payment(this.config).get({ id: paymentId });
-    // Defensa adicional: nunca se procesa un pago real.
-    if (pago.live_mode) return null;
-    const ref = pago.external_reference ?? '';
-    if (!ref.startsWith('pago:')) return null;
-    if (!['approved', 'rejected', 'cancelled'].includes(pago.status ?? '')) return null;
-    return { tipo: 'PAGO', pagoId: Number(ref.slice(5)), referenciaExterna: String(pago.id), aprobado: pago.status === 'approved' };
+    return interpretarOrden(await new Order(this.config).get({ id: ordenId }));
+  }
+
+  /** Busca la orden más reciente del pago de NeuroGym por su referencia externa. */
+  async consultarOrdenDePago(pagoId: number, desde: Date): Promise<ResultadoOperacion | null> {
+    await this.verificarModoPrueba();
+    const dia = 86_400_000;
+    const resultado = await new Order(this.config).search({
+      options: {
+        external_reference: `pago:${pagoId}`,
+        begin_date: new Date(desde.getTime() - dia).toISOString(),
+        end_date: new Date(Date.now() + dia).toISOString(),
+        sort_by: 'created_date',
+        sort_order: 'desc',
+      },
+    });
+    const orden = resultado.data?.find((o) => o.external_reference === `pago:${pagoId}`);
+    return orden ? interpretarOrden(orden) : null;
   }
 
   async consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null> {

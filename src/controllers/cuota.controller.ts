@@ -76,7 +76,7 @@ export const cuotaController = {
   async confirmarRetorno(req: Request, res: Response) {
     const datos = validar(retornoMercadoPagoSchema, req.body);
     const { socioId } = socioDe(req);
-    if (datos.paymentId) return res.json(await cuotaService.confirmarRetornoPago(datos.paymentId, socioId));
+    if (datos.pagoId) return res.json(await cuotaService.confirmarRetornoPago(datos.pagoId, socioId));
     res.json(await cuotaService.confirmarRetornoAdhesion(datos.preapprovalId!, socioId));
   },
 

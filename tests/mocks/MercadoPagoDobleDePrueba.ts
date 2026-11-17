@@ -14,7 +14,7 @@ import type {
 export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
   readonly modo = 'DOBLE_DE_PRUEBA' as const;
   readonly debitosCancelados: string[] = [];
-  /** Respuestas que devolverá consultarPago / consultarPreaprobacion, por id. */
+  /** Respuestas que devolverán consultarOrden / consultarPreaprobacion, por id. */
   readonly respuestas = new Map<string, ResultadoOperacion | null>();
   firmaValida = false;
 
@@ -39,8 +39,13 @@ export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
     return this.respuestas.get(id) ?? null;
   }
 
-  async consultarPago(paymentId: string): Promise<ResultadoOperacion | null> {
-    return this.respuestas.get(paymentId) ?? null;
+  async consultarOrden(ordenId: string): Promise<ResultadoOperacion | null> {
+    return this.respuestas.get(ordenId) ?? null;
+  }
+
+  /** La orden de un pago se registra en el doble con la clave "pago:{id}", como su external_reference. */
+  async consultarOrdenDePago(pagoId: number): Promise<ResultadoOperacion | null> {
+    return this.respuestas.get(`pago:${pagoId}`) ?? null;
   }
 
   async consultarPreaprobacion(id: string): Promise<ResultadoOperacion | null> {

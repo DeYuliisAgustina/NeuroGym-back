@@ -144,7 +144,7 @@ Prefijo `/api`. Respuestas JSON; errores con `{ error, mensaje, detalle }`.
 
 | Integración | Implementación real | Estado | Sin credenciales |
 |---|---|---|---|
-| Mercado Pago | `integrations/mercadopago/MercadoPagoApiGateway.ts`: preferencias, preaprobaciones, baja de débito, validación `x-signature`, consulta de pagos | **Pendiente de credenciales de prueba** (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`) y de una URL pública para el webhook | Simulador local `MercadoPagoSimulado` (no mueve dinero) |
+| Mercado Pago | `integrations/mercadopago/MercadoPagoApiGateway.ts`: pago único con órdenes de Checkout Pro (**API de Orders**, `POST /v1/orders`), débito automático con Suscripciones (PreApproval), baja del débito, validación `x-signature` y consulta de órdenes y preaprobaciones. Solo cuotas de socios y solo entorno de prueba | **Pendiente de prueba con credenciales de Mercado Pago Developers** (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `MP_TEST_PAYER_EMAIL`) y de una URL HTTPS para el webhook | Sin credenciales el pago en línea queda deshabilitado (no hay simulador); las pruebas automatizadas usan un doble de prueba |
 | WhatsApp | `integrations/mensajeria/WhatsAppCloudApi.ts` (Meta Graph API) | **Pendiente de credenciales** (`WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`); fuera de la ventana de 24 h Meta exige plantillas aprobadas | `MensajeriaSimulada` (no envía mensajes) |
 | IA | `integrations/ia/ServicioIAClaude.ts` (salidas estructuradas validadas con Zod) | **Pendiente de credencial** (`ANTHROPIC_API_KEY`) | `ServicioIASimulado` (reglas determinísticas) |
 | Almacenamiento de objetos | `integrations/almacenamiento/AlmacenamientoObjetos.ts` | Almacenamiento local de desarrollo; proveedor S3 compatible pendiente | — |

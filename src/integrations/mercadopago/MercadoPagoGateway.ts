@@ -36,7 +36,7 @@ export type ModoIntegracion = 'PRUEBA' | 'NO_CONFIGURADO' | 'DOBLE_DE_PRUEBA';
 
 export interface MercadoPagoGateway {
   readonly modo: ModoIntegracion;
-  /** Crea la preferencia de Checkout Pro y devuelve la URL de pago. */
+  /** Crea la orden de Checkout Pro (API de Orders) y devuelve la URL de pago (checkout_url). */
   crearPago(solicitud: SolicitudPago): Promise<string>;
   /** Crea la preaprobación del débito automático y devuelve la URL de autorización. */
   crearDebito(solicitud: SolicitudDebito): Promise<string>;
@@ -46,8 +46,13 @@ export interface MercadoPagoGateway {
   validarWebhook(notificacion: NotificacionEntrante): boolean;
   /** Consulta a Mercado Pago el recurso notificado y normaliza su resultado. */
   interpretarNotificacion(notificacion: NotificacionEntrante): Promise<ResultadoOperacion | null>;
-  /** Consulta un pago por su id (retorno del checkout o conciliación manual). */
-  consultarPago(paymentId: string): Promise<ResultadoOperacion | null>;
+  /** Consulta una orden de Checkout Pro por su id (notificación "order"). */
+  consultarOrden(ordenId: string): Promise<ResultadoOperacion | null>;
+  /**
+   * Busca la orden asociada a un pago de NeuroGym (external_reference "pago:{id}").
+   * Se usa al regresar del checkout: la URL de retorno solo lleva el id interno del pago.
+   */
+  consultarOrdenDePago(pagoId: number, desde: Date): Promise<ResultadoOperacion | null>;
   /** Consulta una preaprobación por su id (retorno de la autorización del débito). */
   consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null>;
 }

@@ -30,10 +30,13 @@ export const filtroCuotasSchema = z.object({
   periodo: periodoSchema.optional(),
   busqueda: z.string().trim().max(100).optional(),
 });
-/** Parámetros con los que Mercado Pago regresa al frontend (payment_id o preapproval_id). */
+/**
+ * Datos del regreso desde Mercado Pago: el id interno del pago único (orden de
+ * Checkout Pro) o el preapproval_id de la adhesión al débito automático.
+ */
 export const retornoMercadoPagoSchema = z
   .object({
-    paymentId: z.string().regex(/^\d{1,20}$/).optional(),
+    pagoId: idSchema.optional(),
     preapprovalId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/).optional(),
   })
-  .refine((d) => Boolean(d.paymentId) !== Boolean(d.preapprovalId), 'Indicá paymentId o preapprovalId');
+  .refine((d) => Boolean(d.pagoId) !== Boolean(d.preapprovalId), 'Indicá pagoId o preapprovalId');
