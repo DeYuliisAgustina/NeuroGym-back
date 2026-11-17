@@ -39,10 +39,25 @@ export const cuotaRepository = {
    * Mientras tanto no pasa a IMPAGA ni admite otros medios; conserva su vencimiento.
    */
   async debitoProgramado(cuota: { id: number; socioId: number; periodo: string; estado: string }, periodoActual: string, cliente: Cliente = prisma) {
+    // Solo el período en curso: al terminar el mes deja de estar programada aunque el cobro no llegue.
     if (cuota.estado === 'PAGADA' || cuota.periodo !== periodoActual) return false;
     const adhesion = await cliente.adhesionDebito.findFirst({ where: { socioId: cuota.socioId, estado: 'ACTIVA' } });
     if (!adhesion || cuota.periodo < adhesion.fechaAlta.toISOString().slice(0, 7)) return false;
+    if (await this.adhesionPausada(adhesion.id, cliente)) return false;
     return !(await cliente.pago.findFirst({ where: { cuotaId: cuota.id, medio: 'DEBITO_AUTOMATICO', estado: 'RECHAZADO' } }));
+  },
+
+  /**
+   * Suscripción pausada en Mercado Pago. El diccionario de datos solo admite
+   * ACTIVA/CANCELADA para la adhesión: la pausa se registra en auditoría y vale el
+   * último evento (pausada o reanudada) de la adhesión.
+   */
+  async adhesionPausada(adhesionId: number, cliente: Cliente = prisma) {
+    const ultimo = await cliente.auditoria.findFirst({
+      where: { entidad: 'adhesion_debito', entidadId: adhesionId, accion: { in: ['ADHESION_PAUSADA_EN_MERCADO_PAGO', 'ADHESION_REANUDADA_EN_MERCADO_PAGO'] } },
+      orderBy: { id: 'desc' },
+    });
+    return ultimo?.accion === 'ADHESION_PAUSADA_EN_MERCADO_PAGO';
   },
 
   buscarConSocio(cuotaId: number, cliente: Cliente = prisma) {

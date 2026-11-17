@@ -216,15 +216,24 @@ export class CuotaService {
       // Curso alternativo 4.1: si Mercado Pago no confirma la baja, la adhesión sigue activa.
       throw new ErrorApp(502, 'MP_BAJA_NO_CONFIRMADA', 'Mercado Pago no confirmó la baja. La adhesión continúa activa.');
     }
+    return prisma.$transaction((tx) => this.darDeBajaLocal(tx, adhesion, 'BAJA_DEBITO', { origen: 'SOCIO' }));
+  }
+
+  /**
+   * Baja de la adhesión en NeuroGym. Sin débito programado, una cuota ya vencida
+   * vuelve a su estado real (IMPAGA) y conserva su fecha de vencimiento.
+   */
+  private async darDeBajaLocal(tx: Tx, adhesion: { id: number; socioId: number }, accion: string, detalle: Prisma.InputJsonValue) {
     const hoy = ahoraLocal().fecha;
-    const actualizada = await prisma.adhesionDebito.update({
-      where: { id: adhesion.id },
-      data: { estado: 'CANCELADA', fechaBaja: aFechaDb(hoy) },
-    });
-    // Sin débito programado, una cuota ya vencida vuelve a su estado real (conserva su vencimiento).
-    await prisma.cuota.updateMany({ where: { socioId, estado: 'PENDIENTE', fechaVencimiento: { lt: aFechaDb(hoy) } }, data: { estado: 'IMPAGA' } });
-    await registrarAuditoria({ accion: 'BAJA_DEBITO', entidad: 'adhesion_debito', entidadId: adhesion.id });
+    const actualizada = await tx.adhesionDebito.update({ where: { id: adhesion.id }, data: { estado: 'CANCELADA', fechaBaja: aFechaDb(hoy) } });
+    await this.marcarVencidasImpagas(tx, adhesion.socioId);
+    await registrarAuditoria({ accion, entidad: 'adhesion_debito', entidadId: adhesion.id, detalle }, tx);
     return actualizada;
+  }
+
+  private async marcarVencidasImpagas(tx: Tx, socioId: number) {
+    const hoy = aFechaDb(ahoraLocal().fecha);
+    await tx.cuota.updateMany({ where: { socioId, estado: 'PENDIENTE', fechaVencimiento: { lt: hoy } }, data: { estado: 'IMPAGA' } });
   }
 
   // ------------------------------------------------------------------
@@ -281,7 +290,7 @@ export class CuotaService {
   async registrarResultado(op: ResultadoOperacion, origen: OrigenResultado = 'WEBHOOK'): Promise<ResultadoRegistro> {
     try {
       if (op.tipo === 'ADHESION') {
-        const adhesion = await this.registrarAdhesion(op);
+        const adhesion = await this.registrarAdhesion(op, origen);
         if (op.autorizada) await this.sincronizarCobrosDeAdhesion(op.idPreaprobacion, origen);
         return adhesion;
       }
@@ -450,9 +459,24 @@ export class CuotaService {
       where: { OR: [{ estado: 'ACTIVA' }, { estado: 'CANCELADA', fechaBaja: { gte: aFechaDb(sumarDias(hoy, -35)) } }] },
       orderBy: { id: 'asc' },
     });
-    const resumen = { fecha: hoy, adhesiones: adhesiones.length, cobros: 0, registrados: 0, duplicados: 0, pendientes: 0, sinRegistrar: 0, errores: 0 };
+    const resumen = {
+      fecha: hoy,
+      adhesiones: adhesiones.length,
+      estadosActualizados: 0,
+      cobros: 0,
+      registrados: 0,
+      duplicados: 0,
+      pendientes: 0,
+      sinRegistrar: 0,
+      errores: 0,
+    };
     for (const adhesion of adhesiones) {
       try {
+        // Estado de la suscripción: una baja o pausa hecha en Mercado Pago se refleja en NeuroGym.
+        if (adhesion.estado === 'ACTIVA') {
+          const suscripcion = await this.gateway.consultarPreaprobacion(adhesion.idPreaprobacion);
+          if (suscripcion?.tipo === 'ADHESION' && (await this.registrarAdhesion(suscripcion, 'CONCILIACION')).procesado) resumen.estadosActualizados++;
+        }
         const cobros = await this.gateway.consultarCobrosDeAdhesion(adhesion.idPreaprobacion);
         for (const cobro of cobros) {
           resumen.cobros++;
@@ -471,9 +495,17 @@ export class CuotaService {
     return resumen;
   }
 
-  private async registrarAdhesion(op: Extract<ResultadoOperacion, { tipo: 'ADHESION' }>) {
+  /**
+   * Alta de la adhesión, o actualización de su estado si ya existe: una baja o
+   * pausa hecha directamente en Mercado Pago (webhook, regreso o conciliación)
+   * se refleja en NeuroGym para que la cuota no quede como débito programado.
+   */
+  private async registrarAdhesion(op: Extract<ResultadoOperacion, { tipo: 'ADHESION' }>, origen: OrigenResultado = 'WEBHOOK') {
     return prisma.$transaction(async (tx) => {
-      if (await cuotaRepository.adhesionPorPreaprobacion(op.idPreaprobacion, tx)) return { procesado: false, duplicado: true };
+      const existente = await cuotaRepository.adhesionPorPreaprobacion(op.idPreaprobacion, tx);
+      if (existente) return this.actualizarEstadoAdhesion(tx, existente, op.estado, origen);
+      // Suscripción creada y todavía sin autorizar: no es un resultado.
+      if (op.estado === 'pending') return { procesado: false };
       if (!op.autorizada) {
         // CU-001-004 5.1: la autorización no se confirmó; el socio sigue sin débito.
         await this.notificarSocio(tx, op.socioId, 'No pudo completarse la adhesión al débito automático.');
@@ -486,6 +518,33 @@ export class CuotaService {
       await this.notificarSocio(tx, op.socioId, 'Tu adhesión al débito automático quedó activa: tus cuotas tendrán 10 % de descuento.');
       return { procesado: true };
     });
+  }
+
+  private async actualizarEstadoAdhesion(
+    tx: Tx,
+    adhesion: { id: number; socioId: number; estado: string },
+    estadoMp: string | undefined,
+    origen: OrigenResultado,
+  ): Promise<ResultadoRegistro> {
+    if (adhesion.estado !== 'ACTIVA' || !estadoMp) return { procesado: false, duplicado: true };
+    if (estadoMp === 'cancelled') {
+      await this.darDeBajaLocal(tx, adhesion, 'BAJA_DEBITO_EN_MERCADO_PAGO', { origen });
+      await this.notificarSocio(tx, adhesion.socioId, 'Tu débito automático figura cancelado en Mercado Pago. Tus cuotas se abonan con Mercado Pago o en efectivo.');
+      return { procesado: true };
+    }
+    const pausada = await cuotaRepository.adhesionPausada(adhesion.id, tx);
+    if (estadoMp === 'paused' && !pausada) {
+      await registrarAuditoria({ accion: 'ADHESION_PAUSADA_EN_MERCADO_PAGO', entidad: 'adhesion_debito', entidadId: adhesion.id, detalle: { origen } }, tx);
+      await this.marcarVencidasImpagas(tx, adhesion.socioId);
+      await this.notificarSocio(tx, adhesion.socioId, 'Tu débito automático está pausado en Mercado Pago. Mientras tanto, tus cuotas se abonan con Mercado Pago o en efectivo.');
+      return { procesado: true };
+    }
+    if (estadoMp === 'authorized' && pausada) {
+      await registrarAuditoria({ accion: 'ADHESION_REANUDADA_EN_MERCADO_PAGO', entidad: 'adhesion_debito', entidadId: adhesion.id, detalle: { origen } }, tx);
+      await this.notificarSocio(tx, adhesion.socioId, 'Tu débito automático volvió a estar activo en Mercado Pago.');
+      return { procesado: true };
+    }
+    return { procesado: false, duplicado: true };
   }
 
   /** CU-001-007 pasos 1 y 2: cuota PAGADA con su composición y comprobante emitido. */

@@ -109,37 +109,84 @@ export function interpretarOrden(orden: OrderResponse): ResultadoOperacion | nul
   return { tipo: 'PAGO', pagoId, referenciaExterna: String(ultimo?.id ?? orden.id), aprobado: aprobada };
 }
 
-/** Cobro de una suscripción (authorized_payment) según la API REST de Mercado Pago. */
+/**
+ * Factura de una suscripción (authorized_payment) según la API REST de Mercado Pago.
+ * Documentado: status scheduled | processed | recycling | canceled; date_created es
+ * el alta de la factura y debit_date, la fecha del intento (cambia en cada reintento).
+ * No hay campo de período ni de número de ciclo.
+ */
 export interface CobroRecurrente {
   id: number;
   preapproval_id: string;
   status: string;
-  /** Alta del cobro del ciclo; se conserva en los reintentos (verificado: existe en el entorno de prueba). */
   date_created?: string;
-  /** Fecha del débito; Mercado Pago la reprograma en cada reintento (hasta 10 días). */
   debit_date?: string;
-  transaction_amount?: number;
+  transaction_amount?: number | string;
   retry_attempt?: number;
-  payment?: { id?: number | string; status?: string };
+  payment?: { id?: number | string; status?: string; status_detail?: string };
+}
+
+/** Calendario de la suscripción (preapproval.auto_recurring). */
+export interface CalendarioSuscripcion {
+  start_date?: string;
+  frequency?: number;
+  frequency_type?: string;
+  billing_day?: number;
+}
+
+/** Margen máximo (días) entre el alta de una factura y su ciclo: a mitad de camino entre dos ciclos es ambiguo. */
+const MARGEN_CICLO_DIAS = 12;
+const DIA_MS = 86_400_000;
+
+/**
+ * Período facturado ('AAAA-MM') de una factura: se reconstruye el calendario de la
+ * suscripción (start_date + frecuencia mensual, o billing_day) y se elige el ciclo
+ * más cercano al alta de la factura. No depende de la hora exacta del alta (una
+ * factura generada horas antes del cambio de mes queda en su ciclo) ni de los
+ * reintentos (debit_date). Devuelve null si no hay calendario o si la factura no
+ * cae cerca de ningún ciclo: el cobro queda pendiente de conciliación.
+ */
+export function periodoDelCiclo(altaFactura: string | undefined, calendario: CalendarioSuscripcion | undefined): string | null {
+  if (!altaFactura || !calendario?.start_date) return null;
+  const frecuencia = calendario.frequency ?? 1;
+  if ((calendario.frequency_type ?? 'months') !== 'months' || frecuencia < 1) return null;
+  const inicio = new Date(calendario.start_date);
+  const alta = new Date(altaFactura);
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(alta.getTime())) return null;
+  const [ai, mi, di] = ahoraLocal(inicio).fecha.split('-').map(Number);
+  const [aa, ma] = ahoraLocal(alta).fecha.split('-').map(Number);
+  const altaDia = new Date(`${ahoraLocal(alta).fecha}T00:00:00Z`).getTime();
+  const dia = calendario.billing_day ?? di;
+  const desfase = aa * 12 + ma - (ai * 12 + mi);
+  let mejor: { fecha: Date; distancia: number } | null = null;
+  for (let k = desfase - 1; k <= desfase + 1; k++) {
+    if (k < 0 || k % frecuencia !== 0) continue;
+    const ultimoDia = new Date(Date.UTC(ai, mi - 1 + k + 1, 0)).getUTCDate();
+    const ciclo = new Date(Date.UTC(ai, mi - 1 + k, Math.min(dia, ultimoDia)));
+    const distancia = Math.abs(altaDia - ciclo.getTime()) / DIA_MS;
+    if (!mejor || distancia < mejor.distancia) mejor = { fecha: ciclo, distancia };
+  }
+  if (!mejor || mejor.distancia > MARGEN_CICLO_DIAS) return null;
+  return mejor.fecha.toISOString().slice(0, 7);
 }
 
 /**
- * Solo los cobros resueltos generan un resultado; los programados o en proceso, no.
- * Mercado Pago no informa el período facturado: se usa el mes (hora de Argentina)
- * de date_created. Si falta, el período queda en null y el cobro se registra como
- * pendiente de conciliación, sin imputarlo a ninguna cuota.
+ * Solo las facturas resueltas generan un resultado; las programadas o en cobro, no.
+ * Aprobada: pago approved. No concretada: pago rechazado o cancelado, o factura
+ * cancelada sin pago (la cuota deja de figurar como débito programado).
  */
-export function interpretarCobroRecurrente(cobro: CobroRecurrente): CobroDeSuscripcion | null {
-  const estado = cobro.payment?.status ?? cobro.status;
-  if (estado !== 'approved' && estado !== 'rejected') return null;
-  const alta = cobro.date_created ? new Date(cobro.date_created) : null;
+export function interpretarCobroRecurrente(cobro: CobroRecurrente, calendario?: CalendarioSuscripcion): CobroDeSuscripcion | null {
+  const pago = cobro.payment?.status;
+  const aprobado = pago === 'approved';
+  const noConcretado = pago === 'rejected' || pago === 'cancelled' || pago === 'canceled' || (!pago && cobro.status === 'canceled');
+  if (!aprobado && !noConcretado) return null;
   return {
     tipo: 'DEBITO',
     idPreaprobacion: cobro.preapproval_id,
     referenciaExterna: `ap-${cobro.id}`,
-    aprobado: estado === 'approved',
-    periodo: alta && !Number.isNaN(alta.getTime()) ? periodoDe(ahoraLocal(alta).fecha) : null,
-    importe: cobro.transaction_amount,
+    aprobado,
+    periodo: periodoDelCiclo(cobro.date_created, calendario),
+    importe: cobro.transaction_amount !== undefined ? Number(cobro.transaction_amount) : undefined,
     pagoMercadoPago: cobro.payment?.id !== undefined ? String(cobro.payment.id) : undefined,
     fechaDebito: cobro.debit_date,
     intento: cobro.retry_attempt,
@@ -313,7 +360,7 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
     const pre = await new PreApproval(this.config).get({ id: idPreaprobacion });
     const ref = pre.external_reference ?? '';
     if (!ref.startsWith('socio:')) return null;
-    return { tipo: 'ADHESION', socioId: Number(ref.slice(6)), idPreaprobacion: pre.id!, autorizada: pre.status === 'authorized' };
+    return { tipo: 'ADHESION', socioId: Number(ref.slice(6)), idPreaprobacion: pre.id!, autorizada: pre.status === 'authorized', estado: pre.status };
   }
 
   /** Cobro mensual de una suscripción. El SDK no expone este recurso: se usa la API REST oficial. */
@@ -323,7 +370,8 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
       headers: { Authorization: `Bearer ${this.accessToken}` },
     });
     if (!respuesta.ok) return null;
-    return interpretarCobroRecurrente((await respuesta.json()) as CobroRecurrente);
+    const cobro = (await respuesta.json()) as CobroRecurrente;
+    return interpretarCobroRecurrente(cobro, await this.calendario(cobro.preapproval_id));
   }
 
   /**
@@ -344,6 +392,13 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
       cobros.push(...results);
       if (results.length < limite || cobros.length >= (paging?.total ?? 0)) break;
     }
-    return cobros.map(interpretarCobroRecurrente).filter((r): r is CobroDeSuscripcion => r !== null);
+    const calendario = await this.calendario(idPreaprobacion);
+    return cobros.map((c) => interpretarCobroRecurrente(c, calendario)).filter((r): r is CobroDeSuscripcion => r !== null);
+  }
+
+  /** Calendario de cobro de la suscripción (start_date, frecuencia y billing_day). */
+  private async calendario(idPreaprobacion: string): Promise<CalendarioSuscripcion | undefined> {
+    const pre = await new PreApproval(this.config).get({ id: idPreaprobacion });
+    return pre.auto_recurring as CalendarioSuscripcion | undefined;
   }
 }

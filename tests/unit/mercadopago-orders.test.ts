@@ -1,6 +1,6 @@
 import { Order, User } from 'mercadopago';
 import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
-import { armarOrdenCheckoutPro, destinoRetornoAdhesion, esCuentaDePrueba, interpretarCobroRecurrente, interpretarOrden, MercadoPagoApiGateway, referenciaDePago, urlRetornoAdhesion } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
+import { armarOrdenCheckoutPro, destinoRetornoAdhesion, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway, referenciaDePago, urlRetornoAdhesion } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
 
 const solicitud = { pagoId: 42, descripcion: 'Cuota NeuroGym 2026-11', importe: 44000, emailPagador: 'socio@prueba.local' };
 const orden = (datos: Partial<OrderResponse>) => ({ id: 'ORD01TEST', external_reference: 'pago-42', ...datos }) as OrderResponse;
@@ -113,36 +113,6 @@ describe('Mercado Pago: credenciales de prueba de la API de Orders (prefijo APP_
   });
 });
 
-describe('Mercado Pago: cobros de una suscripción (authorized_payments)', () => {
-  const base = { id: 7034076181, preapproval_id: 'PRE', status: 'processed', transaction_amount: 28800, retry_attempt: 1 };
-
-  it('toma el período del alta del cobro en hora de Argentina y conserva los identificadores', () => {
-    const cobro = interpretarCobroRecurrente({ ...base, date_created: '2026-11-17T11:34:32.000-04:00', payment: { id: 190138992156, status: 'approved' } });
-    expect(cobro).toEqual({
-      tipo: 'DEBITO',
-      idPreaprobacion: 'PRE',
-      referenciaExterna: 'ap-7034076181',
-      aprobado: true,
-      periodo: '2026-11',
-      importe: 28800,
-      pagoMercadoPago: '190138992156',
-      fechaDebito: undefined,
-      intento: 1,
-    });
-    // 01:00 UTC del 1/12 todavía es 30/11 en Argentina.
-    expect(interpretarCobroRecurrente({ ...base, date_created: '2026-12-01T01:00:00.000Z', payment: { status: 'approved' } })?.periodo).toBe('2026-11');
-    // Un reintento reprograma debit_date, pero el período sigue siendo el del ciclo.
-    expect(
-      interpretarCobroRecurrente({ ...base, date_created: '2026-11-28T10:00:00.000-03:00', debit_date: '2026-12-05T10:00:00.000-03:00', payment: { status: 'approved' } })
-        ?.periodo,
-    ).toBe('2026-11');
-  });
-
-  it('sin fecha de alta el período queda sin identificar; los cobros no resueltos se ignoran', () => {
-    expect(interpretarCobroRecurrente({ ...base, payment: { status: 'rejected' } })).toMatchObject({ periodo: null, aprobado: false });
-    expect(interpretarCobroRecurrente({ ...base, status: 'scheduled' })).toBeNull();
-  });
-});
 
 describe('Mercado Pago: regreso de la autorización del débito automático', () => {
   it('sin URL pública usa 127.0.0.1 (Suscripciones rechaza "localhost") y vuelve al frontend con el preapproval_id', () => {

@@ -189,4 +189,63 @@ describe('Imputación del débito automático al período facturado y conciliaci
     expect(await prisma.pago.count({ where: { referenciaExterna: cobro.referenciaExterna } })).toBe(1);
     expect(await prisma.auditoria.count({ where: { accion: 'CONCILIACION_DEBITOS' } })).toBeGreaterThanOrEqual(2);
   });
+
+  const estadoEsperado = (vencimiento: Date) => (fechaIso(vencimiento) < ahoraLocal().fecha ? 'IMPAGA' : 'PENDIENTE');
+
+  it('suscripción pausada en Mercado Pago: deja de estar programada; al reanudarse vuelve a estarlo', async () => {
+    const { socio, delPeriodo } = await socioConDeuda();
+    await adherir(socio.id, 'PRE-PAUSA');
+    await prisma.cuota.update({ where: { id: delPeriodo.id }, data: { estado: 'PENDIENTE' } });
+    expect((await request(app).get('/api/socio/cuota').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
+
+    const pausa = { tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-PAUSA', autorizada: false, estado: 'paused' } as const;
+    expect(await cuotaService.registrarResultado(pausa, 'WEBHOOK')).toMatchObject({ procesado: true });
+    const pausada = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    expect(pausada.body.cuota).toMatchObject({ debitoProgramado: false, mediosHabilitados: ['PAGO_UNICO', 'EFECTIVO'] });
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } })).estado).toBe(estadoEsperado(delPeriodo.fechaVencimiento));
+    // La notificación repetida no duplica la pausa.
+    expect(await cuotaService.registrarResultado(pausa)).toMatchObject({ procesado: false });
+
+    await prisma.cuota.update({ where: { id: delPeriodo.id }, data: { estado: 'PENDIENTE' } });
+    await cuotaService.registrarResultado({ ...pausa, autorizada: true, estado: 'authorized' });
+    expect((await request(app).get('/api/socio/cuota').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
+    expect((await prisma.adhesionDebito.findUniqueOrThrow({ where: { idPreaprobacion: 'PRE-PAUSA' } })).estado).toBe('ACTIVA');
+  });
+
+  it('suscripción cancelada en Mercado Pago: la conciliación da de baja la adhesión y la cuota deja de estar programada', async () => {
+    const { socio, delPeriodo } = await socioConDeuda();
+    await adherir(socio.id, 'PRE-BAJA-MP');
+    await prisma.cuota.update({ where: { id: delPeriodo.id }, data: { estado: 'PENDIENTE' } });
+    doble.actual.respuestas.set('PRE-BAJA-MP', { tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-BAJA-MP', autorizada: false, estado: 'cancelled' });
+    const resumen = await cuotaService.conciliarDebitos();
+    expect((resumen as { estadosActualizados: number }).estadosActualizados).toBeGreaterThanOrEqual(1);
+    const adhesion = await prisma.adhesionDebito.findUniqueOrThrow({ where: { idPreaprobacion: 'PRE-BAJA-MP' } });
+    expect(adhesion.estado).toBe('CANCELADA');
+    expect(await prisma.auditoria.count({ where: { accion: 'BAJA_DEBITO_EN_MERCADO_PAGO', entidadId: adhesion.id } })).toBe(1);
+    const detalle = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    expect(detalle.body.cuota).toMatchObject({ debitoProgramado: false });
+    expect(detalle.body.cuota.mediosHabilitados).toContain('PAGO_UNICO');
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } })).estado).toBe(estadoEsperado(delPeriodo.fechaVencimiento));
+  });
+
+  it('el estado programado se limita al período en curso aunque el cobro nunca llegue', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    await adherir(socio.id, 'PRE-SINCOBRO');
+    const cuota = await prisma.cuota.findUniqueOrThrow({ where: { socioId_periodo: { socioId: socio.id, periodo: actual } } });
+    const { cuotaRepository } = await import('../../src/repositories/cuota.repository');
+    expect(await cuotaRepository.debitoProgramado(cuota, actual)).toBe(true);
+    // Terminado el mes sin cobro, deja de estar programada y la tarea diaria la marca impaga.
+    expect(await cuotaRepository.debitoProgramado(cuota, siguiente)).toBe(false);
+    await prisma.cuota.update({ where: { id: cuota.id }, data: { estado: 'PENDIENTE' } });
+    await marcarCuotasVencidas(`${siguiente}-02`);
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('IMPAGA');
+  });
+
+  it('webhook de una suscripción creada y todavía sin autorizar: no avisa un rechazo', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    const antes = await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId } });
+    await cuotaService.registrarResultado({ tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-PEND', autorizada: false, estado: 'pending' });
+    expect(await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId } })).toBe(antes);
+    expect(await prisma.adhesionDebito.count({ where: { idPreaprobacion: 'PRE-PEND' } })).toBe(0);
+  });
 });

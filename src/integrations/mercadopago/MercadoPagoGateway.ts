@@ -49,7 +49,14 @@ export interface CobroDeSuscripcion {
 /** Resultado normalizado de una notificación o consulta a Mercado Pago. */
 export type ResultadoOperacion =
   | { tipo: 'PAGO'; pagoId: number; referenciaExterna: string; aprobado: boolean }
-  | { tipo: 'ADHESION'; socioId: number; idPreaprobacion: string; autorizada: boolean }
+  | {
+      tipo: 'ADHESION';
+      socioId: number;
+      idPreaprobacion: string;
+      autorizada: boolean;
+      /** Estado de la suscripción en Mercado Pago: pending, authorized, paused o cancelled. */
+      estado?: string;
+    }
   | CobroDeSuscripcion;
 
 /** Origen del registro de un resultado (trazabilidad de la conciliación). */
