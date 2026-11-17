@@ -190,11 +190,47 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **Conciliación contra el entorno de prueba real:** encontró el cobro de la adhesión 9 y lo contó como duplicado (ya era el pago #76), sin crear nada. Las 8 adhesiones del seed tienen ids ficticios que Mercado Pago rechaza («Invalid value for id») y figuran como «sin consultar».
 - **Navegador (socio3, cuota del período pagada):** el modal de adhesión avisa que el primer débito será el mes siguiente. Se cerró sin confirmar.
 
-**Pruebas pendientes:**
-- Una adhesión real con la cuota del período ya pagada: confirmar que Mercado Pago respeta `start_date` y no cobra en el acto.
-- Un débito mensual real (siguiente ciclo) y un rechazo con reintento real, para confirmar que `date_created` se conserva entre reintentos.
-- El selector de cuotas en el navegador con un socio que deba cuotas anteriores (por ejemplo, socio4).
-- Recepción real de webhooks de suscripciones (túnel cerrado).
+**Segunda ronda de validaciones (2026-11-17)**
+
+- **Ciclo de facturación de una factura de suscripción.** La referencia oficial de `GET /authorized_payments/{id}` documenta:
+  - `date_created` («Invoice creation date»);
+  - `debit_date` («Date on which we will try to make the payment»);
+  - `retry_attempt`, `status` (`scheduled`, `processed`, `recycling`, `canceled`), `summarized`, `preapproval_id`, `external_reference` y `payment` (id, status, status_detail).
+  - **No documenta un campo de período ni de número de ciclo.** El cobro real del entorno de prueba coincide con eso.
+  - Para no depender solo del alta de la factura, el período se reconstruye con el **calendario de la suscripción**: `auto_recurring.start_date`, frecuencia mensual y `billing_day` si existe, tomados de la preaprobación. La factura se asigna al ciclo más cercano a su `date_created` (`periodoDelCiclo`).
+  - Así, una factura creada horas antes del cambio de mes queda en su ciclo, y los reintentos (que mueven `debit_date`) no la cambian.
+  - Sin calendario, con otra frecuencia o a más de 12 días de cualquier ciclo, el período queda sin identificar y el cobro, pendiente de conciliación.
+  - Verificado con el cobro real de la adhesión 9: período 2026-11.
+  - Además, una factura cancelada sin pago y un pago cancelado se toman como cobro no concretado.
+- **El estado «Débito automático programado» no queda indefinido:**
+  - Solo vale para la cuota del período en curso. Al terminar el mes deja de estarlo aunque el cobro nunca llegue, y la tarea diaria la marca impaga.
+  - Si la suscripción figura **cancelada** en Mercado Pago (webhook, regreso o conciliación diaria), NeuroGym da de baja la adhesión (`BAJA_DEBITO_EN_MERCADO_PAGO`), pasa a impagas las cuotas vencidas y avisa al socio.
+  - Si figura **pausada**, deja de considerarse programada (`ADHESION_PAUSADA_EN_MERCADO_PAGO`) y vuelve a estarlo al reanudarse.
+  - El diccionario solo admite adhesiones ACTIVA o CANCELADA, por eso la pausa queda en auditoría y no en una columna.
+  - Un webhook de una suscripción todavía pendiente ya no avisa un rechazo.
+- **Errores de pago visibles:** «Cuotas y pagos» muestra un aviso destacado (`AvisoPago`) cuando Mercado Pago rechaza el pago o la operación no puede iniciarse.
+  - Tiene título, explicación («No se realizó ningún cobro y tu cuota sigue pendiente») y botones «Intentar de nuevo» y «Elegir otro medio de pago».
+  - Usa `role="alert"` y se lleva a la vista.
+  - Revisado en el navegador, en escritorio y en celular.
+- **Selector de cuotas en el navegador (socio4, octubre y noviembre impagas):** muestra el período en curso y la cuota vencida, con el aviso de que se pagan por separado. Al elegir octubre, el encabezado pasa a «Venció el 10 de octubre» y solo se ofrecen Efectivo y Mercado Pago. No se pagó nada.
+- **Recepción real de webhooks** (túnel Pinggy, panel de prueba):
+  - La primera tanda falló porque la clave del panel ya no coincidía con `MP_WEBHOOK_SECRET`. El diagnóstico sin secretos lo mostró: `SignatureMismatch`, también con un id en minúsculas. La autora actualizó la clave.
+  - Con la clave actualizada, `order` (orden del pago #74) llegó con firma válida y duplicado sin cambios.
+  - `subscription_preapproval` (suscripción de la adhesión 9) llegó con firma válida; el backend consultó la suscripción real y respondió duplicado sin cambios.
+  - Una `subscription_preapproval` enviada con el id de un cobro también tuvo firma válida y respondió `RECURSO_INEXISTENTE`, como corresponde.
+  - El simulador **no ofrece el evento de cobro de suscripción** (`subscription_authorized_payment`); «Pagos (legacy)» es otro tópico. Ese camino del webhook quedó verificado solo con pruebas automáticas. El mismo recurso (`authorized_payments`) sí se consultó contra la API real, desde la conciliación y desde una consulta de solo lectura.
+  - El túnel se cerró al terminar.
+- **Conciliación contra la API real:** con el calendario y el estado de la suscripción, encontró el cobro de la adhesión 9 y lo contó como duplicado, sin crear nada.
+- **Pruebas:** backend 148, con 4 nuevas de suscripciones (calendario y período) y 4 de pausa, baja en Mercado Pago, límite mensual y suscripción pendiente. Frontend 22, con 2 nuevas del aviso de error.
+
+**Estado final de Mercado Pago**
+
+| | Qué incluye |
+|---|---|
+| **Probado de punta a punta en el entorno de prueba** | Pago único aprobado (#74) y rechazado con reintento (#75). Webhooks firmados de `order` (real y simulado) y de `subscription_preapproval` (simulado). Adhesión con primer débito (#76) y baja desde la app. Conciliación contra la API real, sin duplicar. Clave del webhook rotada y verificada. Selector de cuotas y aviso de error en el navegador. Cálculo del período con el calendario real de una suscripción. |
+| **Probado solo con pruebas automáticas (doble de prueba)** | Débito imputado al período facturado con deuda anterior; cuota generada al recibir un débito; período no identificable; débito sobre una cuota ya pagada. Débito programado: bloqueo de otros medios, rechazo que habilita otros medios y reintento aprobado del mismo cobro. Suscripción pausada, reanudada y cancelada en Mercado Pago. Límite mensual del estado programado. Webhook `subscription_authorized_payment`. Inicio diferido de la suscripción (`fechaInicio`) cuando la cuota del período está pagada. |
+| **Requiere validación real con Mercado Pago (cobro real o fecha futura; no se ejecuta sin autorización)** | Que Mercado Pago respete `start_date` y no cobre en el acto con la cuota del período pagada: requiere una adhesión nueva. Un débito mensual del ciclo siguiente: hay que esperar un mes con una suscripción activa. Un débito rechazado con reintentos reales y el mismo `authorized_payment`. Una pausa o baja hecha desde la cuenta de Mercado Pago del comprador. Webhooks reales de suscripciones generados por un cobro, no por el simulador. |
+
 - **Dato histórico:** el pago #76 (adhesión 9) quedó imputado a octubre por la regla anterior. No se modificó, porque su comprobante `NG-00000076` ya fue emitido (RD12).
 
 ### Pendiente
