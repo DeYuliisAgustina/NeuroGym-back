@@ -1,4 +1,5 @@
 import type {
+  CobroDeSuscripcion,
   MercadoPagoGateway,
   NotificacionEntrante,
   ResultadoOperacion,
@@ -22,7 +23,11 @@ export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
     return `https://checkout.prueba.local/pago/${s.pagoId}`;
   }
 
+  /** Suscripciones solicitadas (para verificar importe y fecha de inicio). */
+  readonly debitosCreados: SolicitudDebito[] = [];
+
   async crearDebito(s: SolicitudDebito): Promise<string> {
+    this.debitosCreados.push(s);
     return `https://checkout.prueba.local/debito/${s.socioId}`;
   }
 
@@ -53,9 +58,9 @@ export class MercadoPagoDobleDePrueba implements MercadoPagoGateway {
   }
 
   /** Cobros de cada suscripción, por id de preaprobación. */
-  readonly cobros = new Map<string, ResultadoOperacion[]>();
+  readonly cobros = new Map<string, CobroDeSuscripcion[]>();
 
-  async consultarCobrosDeAdhesion(id: string): Promise<ResultadoOperacion[]> {
+  async consultarCobrosDeAdhesion(id: string): Promise<CobroDeSuscripcion[]> {
     return this.cobros.get(id) ?? [];
   }
 }

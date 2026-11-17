@@ -28,6 +28,8 @@ export interface ContextoCobro {
   socio: { id: number; email: string; nombre: string };
   responsableId?: number;
   adhesionActivaId?: number | null;
+  /** Débito: inicio de la suscripción cuando la cuota del período ya está pagada (sin cobro inmediato). */
+  inicioDebito?: Date;
 }
 
 /** Resultado de iniciar o registrar un cobro. */

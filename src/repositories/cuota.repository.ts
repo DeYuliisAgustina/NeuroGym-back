@@ -9,13 +9,40 @@ const incluirSocio = {
 
 /** Acceso a datos de cuotas, pagos, adhesiones y comprobantes. */
 export const cuotaRepository = {
-  /** Cuota a regularizar: la impaga/pendiente más antigua; si no hay, la más reciente. */
-  async cuotaActual(socioId: number, cliente: Cliente = prisma) {
-    const pendiente = await cliente.cuota.findFirst({
-      where: { socioId, estado: { in: ['PENDIENTE', 'IMPAGA'] } },
+  /**
+   * Cuota del período indicado ('AAAA-MM'); si todavía no existe, la más reciente.
+   * Un pago siempre se imputa a la cuota que se eligió, nunca a la deuda más antigua.
+   */
+  async cuotaDelPeriodo(socioId: number, periodo: string, cliente: Cliente = prisma) {
+    return (
+      (await cliente.cuota.findUnique({ where: { socioId_periodo: { socioId, periodo } } })) ??
+      cliente.cuota.findFirst({ where: { socioId, periodo: { lte: periodo } }, orderBy: { periodo: 'desc' } })
+    );
+  },
+
+  /** Cuotas anteriores al período sin pagar: siguen pendientes y se regularizan por separado. */
+  cuotasAdeudadas(socioId: number, antesDe: string, cliente: Cliente = prisma) {
+    return cliente.cuota.findMany({
+      where: { socioId, periodo: { lt: antesDe }, estado: { in: ['PENDIENTE', 'IMPAGA'] } },
       orderBy: { periodo: 'asc' },
     });
-    return pendiente ?? cliente.cuota.findFirst({ where: { socioId }, orderBy: { periodo: 'desc' } });
+  },
+
+  /** Débitos rechazados de una cuota (habilitan los medios alternativos). */
+  debitoRechazado(cuotaId: number, cliente: Cliente = prisma) {
+    return cliente.pago.findFirst({ where: { cuotaId, medio: 'DEBITO_AUTOMATICO', estado: 'RECHAZADO' } });
+  },
+
+  /**
+   * «Débito automático programado»: la cuota del período en curso de un socio con
+   * adhesión activa (desde el período de alta), sin pagar y sin débito rechazado.
+   * Mientras tanto no pasa a IMPAGA ni admite otros medios; conserva su vencimiento.
+   */
+  async debitoProgramado(cuota: { id: number; socioId: number; periodo: string; estado: string }, periodoActual: string, cliente: Cliente = prisma) {
+    if (cuota.estado === 'PAGADA' || cuota.periodo !== periodoActual) return false;
+    const adhesion = await cliente.adhesionDebito.findFirst({ where: { socioId: cuota.socioId, estado: 'ACTIVA' } });
+    if (!adhesion || cuota.periodo < adhesion.fechaAlta.toISOString().slice(0, 7)) return false;
+    return !(await cliente.pago.findFirst({ where: { cuotaId: cuota.id, medio: 'DEBITO_AUTOMATICO', estado: 'RECHAZADO' } }));
   },
 
   buscarConSocio(cuotaId: number, cliente: Cliente = prisma) {

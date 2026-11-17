@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { env } from '../config/env';
 import { avisarProximosVencimientos, generarCuotasPeriodo, marcarCuotasVencidas } from '../services/cuotaGeneracion.service';
+import { cuotaService } from '../patterns/facade';
 import { equipamientoService } from '../services/equipamiento.service';
 import { planService } from '../services/plan.service';
 import { ejecutarEtlTodos } from './ProcesoETLAsistencia';
@@ -15,6 +16,8 @@ export const tareas: Tarea[] = [
   { nombre: 'Marcar cuotas vencidas', expresion: '15 0 * * *', ejecutar: () => marcarCuotasVencidas() },
   { nombre: 'Avisos de vencimiento', expresion: '0 10 * * *', ejecutar: () => avisarProximosVencimientos() },
   { nombre: 'Sincronizar precios vigentes', expresion: '0 0 * * *', ejecutar: () => planService.sincronizarPreciosVigentes() },
+  // Respaldo de los webhooks: registra los débitos que Mercado Pago cobró y no notificó.
+  { nombre: 'Conciliar débitos de Mercado Pago', expresion: '30 6 * * *', ejecutar: () => cuotaService.conciliarDebitos() },
 ];
 
 /**

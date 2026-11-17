@@ -130,7 +130,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     await cuotaService.registrarResultado({ tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-1', autorizada: true });
     const programado = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'DEBITO_AUTOMATICO' });
     expect(programado.body.tipo).toBe('DEBITO_PROGRAMADO');
-    await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-1', referenciaExterna: 'AP-1', aprobado: true });
+    await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-1', referenciaExterna: 'AP-1', aprobado: true, periodo: cuota.periodo });
     const pagada = await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } });
     expect(pagada).toMatchObject({ estado: 'PAGADA' });
     expect(Number(pagada.descuento)).toBe(3000);
@@ -144,7 +144,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
     const adhesion = { tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-SYNC', autorizada: true } as const;
     doble.actual.respuestas.set('PRE-SYNC', adhesion);
-    doble.actual.cobros.set('PRE-SYNC', [{ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true }]);
+    doble.actual.cobros.set('PRE-SYNC', [{ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true, periodo: cuota.periodo }]);
     const enviadosAntes = mensajeria.enviados.length;
 
     const retorno = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ preapprovalId: 'PRE-SYNC' });
@@ -157,7 +157,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
 
     // Regreso repetido y webhook tardío del mismo cobro: nada se duplica.
     await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ preapprovalId: 'PRE-SYNC' });
-    const tardio = await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true });
+    const tardio = await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-SYNC', referenciaExterna: 'ap-7001', aprobado: true, periodo: cuota.periodo });
     expect(tardio.duplicado).toBe(true);
     expect(await prisma.pago.count({ where: { cuotaId: cuota.id } })).toBe(1);
     expect(await prisma.adhesionDebito.count({ where: { socioId: socio.id } })).toBe(1);

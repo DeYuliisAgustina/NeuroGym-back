@@ -3,7 +3,9 @@ import type { CreateOrderRequest } from 'mercadopago/dist/clients/order/create/t
 import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
 import { env } from '../../config/env';
 import { ErrorApp } from '../../utils/errores';
+import { ahoraLocal, periodoDe } from '../../utils/fechas';
 import type {
+  CobroDeSuscripcion,
   MercadoPagoGateway,
   NotificacionEntrante,
   ResultadoOperacion,
@@ -112,14 +114,36 @@ export interface CobroRecurrente {
   id: number;
   preapproval_id: string;
   status: string;
-  payment?: { status?: string };
+  /** Alta del cobro del ciclo; se conserva en los reintentos (verificado: existe en el entorno de prueba). */
+  date_created?: string;
+  /** Fecha del débito; Mercado Pago la reprograma en cada reintento (hasta 10 días). */
+  debit_date?: string;
+  transaction_amount?: number;
+  retry_attempt?: number;
+  payment?: { id?: number | string; status?: string };
 }
 
-/** Solo los cobros resueltos generan un resultado; los programados o en proceso, no. */
-export function interpretarCobroRecurrente(cobro: CobroRecurrente): ResultadoOperacion | null {
+/**
+ * Solo los cobros resueltos generan un resultado; los programados o en proceso, no.
+ * Mercado Pago no informa el período facturado: se usa el mes (hora de Argentina)
+ * de date_created. Si falta, el período queda en null y el cobro se registra como
+ * pendiente de conciliación, sin imputarlo a ninguna cuota.
+ */
+export function interpretarCobroRecurrente(cobro: CobroRecurrente): CobroDeSuscripcion | null {
   const estado = cobro.payment?.status ?? cobro.status;
   if (estado !== 'approved' && estado !== 'rejected') return null;
-  return { tipo: 'DEBITO', idPreaprobacion: cobro.preapproval_id, referenciaExterna: `ap-${cobro.id}`, aprobado: estado === 'approved' };
+  const alta = cobro.date_created ? new Date(cobro.date_created) : null;
+  return {
+    tipo: 'DEBITO',
+    idPreaprobacion: cobro.preapproval_id,
+    referenciaExterna: `ap-${cobro.id}`,
+    aprobado: estado === 'approved',
+    periodo: alta && !Number.isNaN(alta.getTime()) ? periodoDe(ahoraLocal(alta).fecha) : null,
+    importe: cobro.transaction_amount,
+    pagoMercadoPago: cobro.payment?.id !== undefined ? String(cobro.payment.id) : undefined,
+    fechaDebito: cobro.debit_date,
+    intento: cobro.retry_attempt,
+  };
 }
 
 /**
@@ -189,7 +213,14 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
         external_reference: `socio:${s.socioId}`,
         payer_email: pagador,
         back_url: urlRetornoAdhesion(),
-        auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: s.importeMensual, currency_id: 'ARS' },
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: 'months',
+          transaction_amount: s.importeMensual,
+          currency_id: 'ARS',
+          // Cuota del período ya pagada: la suscripción empieza el mes siguiente (sin cobro inmediato).
+          ...(s.fechaInicio ? { start_date: s.fechaInicio.toISOString() } : {}),
+        },
         status: 'pending',
       },
     });
@@ -300,13 +331,19 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
    * entorno de prueba: al autorizar, Mercado Pago cobra el primer mes en el acto
    * y el webhook de ese cobro puede no llegar; así no queda un cobro sin registrar.
    */
-  async consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<ResultadoOperacion[]> {
+  async consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<CobroDeSuscripcion[]> {
     await this.verificarModoPrueba();
-    const respuesta = await fetch(`https://api.mercadopago.com/authorized_payments/search?preapproval_id=${encodeURIComponent(idPreaprobacion)}`, {
-      headers: { Authorization: `Bearer ${this.accessToken}` },
-    });
-    if (!respuesta.ok) return [];
-    const { results = [] } = (await respuesta.json()) as { results?: CobroRecurrente[] };
-    return results.map(interpretarCobroRecurrente).filter((r): r is ResultadoOperacion => r !== null);
+    const cobros: CobroRecurrente[] = [];
+    const limite = 12; // máximo que admite la API (verificado: un valor mayor responde «Invalid value for limit»)
+    // Paginado: una suscripción larga puede superar una página de resultados.
+    for (let desde = 0, pagina = 0; pagina < 40; pagina++, desde += limite) {
+      const url = `https://api.mercadopago.com/authorized_payments/search?preapproval_id=${encodeURIComponent(idPreaprobacion)}&offset=${desde}&limit=${limite}`;
+      const respuesta = await fetch(url, { headers: { Authorization: `Bearer ${this.accessToken}` } });
+      if (!respuesta.ok) throw new ErrorApp(502, 'MP_COBROS_NO_DISPONIBLES', `Mercado Pago no informó los cobros de la suscripción (HTTP ${respuesta.status})`);
+      const { results = [], paging } = (await respuesta.json()) as { results?: CobroRecurrente[]; paging?: { total?: number } };
+      cobros.push(...results);
+      if (results.length < limite || cobros.length >= (paging?.total ?? 0)) break;
+    }
+    return cobros.map(interpretarCobroRecurrente).filter((r): r is CobroDeSuscripcion => r !== null);
   }
 }

@@ -1,6 +1,7 @@
 import { prisma, type Tx } from '../config/prisma';
 import { CobroDebitoAutomatico, CobroPagoUnico } from '../patterns/strategy';
-import { aFechaDb, ahoraLocal } from '../utils/fechas';
+import { cuotaRepository } from '../repositories/cuota.repository';
+import { aFechaDb, ahoraLocal, periodoDe } from '../utils/fechas';
 import { notificacionService } from './notificacion.service';
 import { preciosParaSocio } from './precios.service';
 
@@ -47,10 +48,13 @@ export async function generarCuotasPeriodo(periodo = ahoraLocal().fecha.slice(0,
 
 /** Tarea diaria: marca IMPAGA la cuota vencida y avisa al socio (RF33, RNF10). */
 export async function marcarCuotasVencidas(hoy = ahoraLocal().fecha) {
-  const vencidas = await prisma.cuota.findMany({
+  const candidatas = await prisma.cuota.findMany({
     where: { estado: 'PENDIENTE', fechaVencimiento: { lt: aFechaDb(hoy) } },
     include: { socio: true },
   });
+  // «Débito automático programado»: no se marca IMPAGA hasta conocer el resultado del débito.
+  const vencidas = [];
+  for (const cuota of candidatas) if (!(await cuotaRepository.debitoProgramado(cuota, periodoDe(hoy)))) vencidas.push(cuota);
   for (const cuota of vencidas) {
     await prisma.cuota.update({ where: { id: cuota.id }, data: { estado: 'IMPAGA' } });
     const mensaje = `Tu cuota ${cuota.periodo} venció y figura impaga. Podés abonarla desde "Cuotas y pagos".`;

@@ -26,7 +26,7 @@ export class CobroDebitoAutomatico implements EstrategiaCobro {
     return { medio: this.medio, ...precios, descuento, importeFinal: redondear(total - descuento) };
   }
 
-  async cobrar(cuota: CuotaACobrar, { socio, adhesionActivaId }: ContextoCobro): Promise<ResultadoCobro> {
+  async cobrar(cuota: CuotaACobrar, { socio, adhesionActivaId, inicioDebito }: ContextoCobro): Promise<ResultadoCobro> {
     const composicion = this.calcularImporte(cuota.precios);
     // CU-001 3.2: con adhesión activa, Mercado Pago debita sin intervención del socio.
     if (adhesionActivaId) return { tipo: 'DEBITO_PROGRAMADO', composicion };
@@ -37,6 +37,7 @@ export class CobroDebitoAutomatico implements EstrategiaCobro {
       descripcion: 'Débito automático cuota NeuroGym',
       importeMensual: composicion.importeFinal,
       emailPagador: socio.email,
+      fechaInicio: inicioDebito,
     });
     return { tipo: 'REDIRECCION', url, composicion };
   }

@@ -1,5 +1,5 @@
 import { ErrorApp } from '../../utils/errores';
-import type { MercadoPagoGateway, NotificacionEntrante, ResultadoOperacion } from './MercadoPagoGateway';
+import type { CobroDeSuscripcion, MercadoPagoGateway, NotificacionEntrante, ResultadoOperacion } from './MercadoPagoGateway';
 
 const sinConfigurar = () =>
   new ErrorApp(503, 'MP_NO_CONFIGURADO', 'Mercado Pago no está configurado: faltan las credenciales de prueba (MP_ACCESS_TOKEN)');
@@ -34,7 +34,7 @@ export class MercadoPagoNoConfigurado implements MercadoPagoGateway {
   async consultarPreaprobacion(): Promise<ResultadoOperacion | null> {
     throw sinConfigurar();
   }
-  async consultarCobrosDeAdhesion(): Promise<ResultadoOperacion[]> {
+  async consultarCobrosDeAdhesion(): Promise<CobroDeSuscripcion[]> {
     throw sinConfigurar();
   }
 }

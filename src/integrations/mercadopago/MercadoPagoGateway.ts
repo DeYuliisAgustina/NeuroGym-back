@@ -17,13 +17,43 @@ export interface SolicitudDebito {
   descripcion: string;
   importeMensual: number;
   emailPagador: string;
+  /**
+   * Inicio de la suscripción. Sin valor, Mercado Pago cobra el primer mes al
+   * autorizar; se indica el mes siguiente cuando la cuota del período ya está pagada.
+   */
+  fechaInicio?: Date;
+}
+
+/** Cobro de una suscripción (authorized_payment) informado por Mercado Pago. */
+export interface CobroDeSuscripcion {
+  tipo: 'DEBITO';
+  idPreaprobacion: string;
+  /** "ap-{id del authorized_payment}": el mismo id en cada reintento del cobro. */
+  referenciaExterna: string;
+  aprobado: boolean;
+  /**
+   * Período facturado ('AAAA-MM'). Mercado Pago no informa un período: se toma
+   * el mes (hora de Argentina) en que generó el cobro del ciclo (date_created),
+   * que no cambia con los reintentos. Null si no puede determinarse.
+   */
+  periodo: string | null;
+  /** Importe realmente cobrado por Mercado Pago. */
+  importe?: number;
+  /** Id del pago de Mercado Pago dentro del cobro (trazabilidad). */
+  pagoMercadoPago?: string;
+  /** Fecha efectiva del débito (debit_date) y número de intento. */
+  fechaDebito?: string;
+  intento?: number;
 }
 
 /** Resultado normalizado de una notificación o consulta a Mercado Pago. */
 export type ResultadoOperacion =
   | { tipo: 'PAGO'; pagoId: number; referenciaExterna: string; aprobado: boolean }
   | { tipo: 'ADHESION'; socioId: number; idPreaprobacion: string; autorizada: boolean }
-  | { tipo: 'DEBITO'; idPreaprobacion: string; referenciaExterna: string; aprobado: boolean };
+  | CobroDeSuscripcion;
+
+/** Origen del registro de un resultado (trazabilidad de la conciliación). */
+export type OrigenResultado = 'WEBHOOK' | 'RETORNO' | 'CONCILIACION';
 
 export interface NotificacionEntrante {
   encabezados: Record<string, string | string[] | undefined>;
@@ -56,5 +86,5 @@ export interface MercadoPagoGateway {
   /** Consulta una preaprobación por su id (retorno de la autorización del débito). */
   consultarPreaprobacion(idPreaprobacion: string): Promise<ResultadoOperacion | null>;
   /** Cobros ya resueltos (aprobados o rechazados) de una suscripción, para no depender solo del webhook. */
-  consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<ResultadoOperacion[]>;
+  consultarCobrosDeAdhesion(idPreaprobacion: string): Promise<CobroDeSuscripcion[]>;
 }

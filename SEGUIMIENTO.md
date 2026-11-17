@@ -100,7 +100,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 | Almacenamiento | Fotos y videos de incidencias en carpeta local | Local | — | Proveedor S3 compatible | Almacenamiento en la nube |
 | Base de datos y servidores | PostgreSQL 18, backend y frontend locales | Local | — | — | Hosting |
 
-### Imputación de cuotas y conciliación de débitos: análisis previo (2026-11-17, sin implementar)
+### Imputación de cuotas y conciliación de débitos (2026-11-17: análisis, decisiones e implementación)
 
 **Pedido de la autora:**
 1. El débito automático paga la cuota del **período facturado**, no la deuda más antigua.
@@ -117,7 +117,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
   - El socio solo ve una cuota y no puede elegir otra (punto 3). El backend ya recibe el id de la cuota en el pago único y en el efectivo, y la pantalla de Cobros del personal ya elige una cuota concreta.
   - El punto 5 ya se cumple: ningún pago cambia otras cuotas.
   - El punto 4 ya se cumple: la estrategia calcula el 10 % solo en `CobroDebitoAutomatico`.
-- **Situaciones que el TFI no define (requieren decisión antes de implementar):**
+- **Situaciones que el TFI no define (se consultaron a la autora; sus decisiones están más abajo):**
   1. **Cómo se determina el período facturado de un débito.** Mercado Pago no informa un período: solo la fecha del débito (`debit_date`). Propuesta: el mes de esa fecha, en hora de Argentina.
   2. **Fecha del débito y vencimiento.** Hoy Mercado Pago debita el mismo día del mes en que se autorizó (17/11 → 17/12), y las cuotas vencen el día 10 (decisión técnica previa). Un socio adherido el 17 quedaría `IMPAGA` del 10 al 17 de cada mes, con advertencia en el ingreso (RD8). Opciones: fijar el día de cobro de la suscripción (`billing_day` de Mercado Pago), no marcar `IMPAGA` a un socio adherido hasta que el débito falle, o aceptar la diferencia.
   3. **Primer cobro al adherirse.** Mercado Pago cobra el primer mes en el acto (verificado). Si la cuota del período ya está pagada por otro medio, ese cobro no tiene cuota. Opción: iniciar la suscripción el mes siguiente (`start_date`) cuando la cuota del período ya esté pagada.
@@ -146,6 +146,56 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
   - cada corrida deja un resumen (adhesiones revisadas, registrados, duplicados, anomalías);
   - las anomalías (cobro sin cuota del período o importe distinto) quedan en auditoría para revisión manual, sin cambios automáticos.
 - **Verificación posible en prueba:** con la adhesión 9 (cancelada, un cobro ya registrado), la conciliación tiene que encontrar el cobro y no duplicarlo. Un débito mensual real no se puede verificar sin esperar un ciclo: queda pendiente.
+
+**Decisiones de la autora (2026-11-17):**
+- **Imputación del débito:** a la cuota del período de facturación, nunca a la impaga más antigua.
+  - Si Mercado Pago informa el período o ciclo, se prioriza sobre la fecha efectiva del cobro.
+  - Si la cuota no existe, se genera con las reglas de facturación de NeuroGym.
+  - Si la cuota ya está pagada, no hay segundo pago ni segundo comprobante.
+  - Si el período no puede identificarse con seguridad, el cobro queda pendiente de conciliación, sin imputarlo.
+  - Se conserva el identificador de Mercado Pago de cada operación.
+- **Fecha del débito posterior al vencimiento:** la cuota se muestra como «Débito automático programado» hasta conocer el resultado, sin marcarla pagada antes de la confirmación.
+  - Aprobado: pasa a «Pagada».
+  - Rechazado: «Impaga», con los medios alternativos habilitados.
+  - La fecha de vencimiento original se conserva.
+- **Primer cobro con la cuota del período ya pagada:** la suscripción empieza el mes siguiente.
+- **Débito activo:** la cuota del período no se puede pagar por otro medio antes del débito. Las cuotas anteriores, sí.
+
+**Verificación del período en Mercado Pago:** el cobro real (`GET /authorized_payments/7034076181`) trae `date_created`, `debit_date`, `retry_attempt`, `type`, `transaction_amount` y `payment` (id y estado), pero **ningún campo de período o ciclo**. Según la documentación, un débito rechazado se reintenta hasta 10 días con una nueva `debit_date`; `date_created` (alta del cobro del ciclo) no cambia. Decisión técnica: período facturado = mes de `date_created` en hora de Argentina. Así un débito demorado por reintentos sigue imputándose a su ciclo. Sin `date_created`, el cobro queda pendiente de conciliación.
+
+**Implementación (backend):**
+- **Cobro de la suscripción:** `interpretarCobroRecurrente` arma un `CobroDeSuscripcion` con el período, el importe cobrado, el id del pago de Mercado Pago, la fecha del débito y el intento.
+- **`registrarDebito`:**
+  - Imputa a `cuota(socio, período)` y la genera con `generarCuotaSocio` si no existe.
+  - Guarda el importe que cobró Mercado Pago; si difiere del calculado, deja `DIFERENCIA_IMPORTE_DEBITO` en auditoría.
+  - Con la cuota ya pagada, o sin período identificable, deja `DEBITO_SOBRE_CUOTA_PAGADA` o `DEBITO_PENDIENTE_CONCILIACION`, una sola vez por cobro.
+  - Un reintento aprobado del mismo cobro pasa de `RECHAZADO` a `APROBADO`.
+  - Cada débito deja `DEBITO_REGISTRADO` con el origen (`WEBHOOK`, `RETORNO` o `CONCILIACION`) y los ids de Mercado Pago.
+- **Débito programado (`cuotaRepository.debitoProgramado`):** aplica a la cuota del período en curso de un socio con adhesión activa (desde el período de alta), sin pagar y sin débito rechazado.
+  - La tarea de vencimientos no la marca `IMPAGA`.
+  - El pago único y el efectivo (socio y personal) responden `DEBITO_PROGRAMADO`.
+  - Un débito rechazado la deja `IMPAGA` si ya venció.
+  - La baja de la adhesión devuelve a `IMPAGA` las cuotas vencidas.
+- **Elección de la cuota (`iniciarOperacion`):** el pago único y el efectivo abonan la cuota elegida, también una vencida. El débito solo acepta la cuota del período en curso (`DEBITO_SOLO_PERIODO`). Con esa cuota ya pagada, la suscripción se crea con `start_date` el mismo día del mes siguiente (máximo 28).
+- **Detalle de la cuota (`obtenerDetalleCuota`):** devuelve la cuota del período, las adeudadas anteriores y, por cuota, `debitoProgramado` y `mediosHabilitados`. Se eliminó `cuotaActual` (la regla anterior).
+- **Conciliación:**
+  - `CuotaService.conciliarDebitos()`: tarea diaria a las 6:30 y `npm run mp:conciliar`.
+  - Recorre las adhesiones activas y las canceladas en los últimos 35 días.
+  - Consulta `authorized_payments/search` paginado. El máximo es `limit=12`; un valor mayor responde «Invalid value for limit».
+  - Deja el resumen `CONCILIACION_DEBITOS` en auditoría.
+- **Interfaz:** «Cuotas y pagos» muestra un selector «Cuota a abonar» (período en curso más las vencidas), avisa que cada cuota se paga por separado y ofrece solo los medios habilitados. También muestra el estado «Débito automático programado» y, al adherirse con la cuota del período pagada, avisa que el primer débito será el mes siguiente.
+
+**Verificado (2026-11-17):**
+- Pruebas automáticas: backend 142 (7 nuevas de imputación y conciliación, 2 de períodos de cobro) y frontend 20 (2 nuevas del selector y del débito programado).
+- **Conciliación contra el entorno de prueba real:** encontró el cobro de la adhesión 9 y lo contó como duplicado (ya era el pago #76), sin crear nada. Las 8 adhesiones del seed tienen ids ficticios que Mercado Pago rechaza («Invalid value for id») y figuran como «sin consultar».
+- **Navegador (socio3, cuota del período pagada):** el modal de adhesión avisa que el primer débito será el mes siguiente. Se cerró sin confirmar.
+
+**Pruebas pendientes:**
+- Una adhesión real con la cuota del período ya pagada: confirmar que Mercado Pago respeta `start_date` y no cobra en el acto.
+- Un débito mensual real (siguiente ciclo) y un rechazo con reintento real, para confirmar que `date_created` se conserva entre reintentos.
+- El selector de cuotas en el navegador con un socio que deba cuotas anteriores (por ejemplo, socio4).
+- Recepción real de webhooks de suscripciones (túnel cerrado).
+- **Dato histórico:** el pago #76 (adhesión 9) quedó imputado a octubre por la regla anterior. No se modificó, porque su comprobante `NG-00000076` ya fue emitido (RD12).
 
 ### Pendiente
 
