@@ -32,8 +32,8 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **133 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de la API de Orders (rechazo con reintento, firma con id en minúsculas, regreso del débito), la sincronización del primer cobro del débito, 5 del modo de prueba de WhatsApp y el reenvío del comprobante sin duplicar.
-- Frontend `npm test`: **18 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
+- Backend `npm test`: **161 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación) y las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos y modo de prueba).
+- Frontend `npm test`: **23 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
 
@@ -95,7 +95,7 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 | Mercado Pago, pago único (Orders) | Creación de la orden, checkout, regreso, confirmación por API, aprobación, rechazo con reintento, cuota PAGADA, comprobante, idempotencia | Pago aprobado #74 y rechazado #75 de punta a punta, por regreso y por webhook | — | — | Credenciales productivas y cuenta real del gimnasio; Mercado Pago cobra comisión por cada pago real (sin abono mensual) |
 | Mercado Pago, débito automático (Suscripciones) | Adhesión con 10 %, primer cobro registrado, comprobante, baja | Adhesión autorizada, cobro de $28.800 (pago #76), baja `cancelled` | — | Cobros mensuales siguientes (no se esperaron) | Igual que el pago único (comisión por débito real) |
 | Webhooks de Mercado Pago | Firma (SDK oficial; Orders con id en minúsculas) e interpretación | Webhook simulado del panel y webhook real `order.transaction_attempt_failed` por túnel gratuito | — | Webhooks de suscripciones: no llegaron en prueba (los cubre la sincronización) | URL pública HTTPS (hosting) |
-| WhatsApp Cloud API | Adaptador real, destinatario de prueba obligatorio, reenvío del comprobante | — (faltan las credenciales de Meta) | Hoy todos los envíos (`MensajeriaSimulada`) | Envío real del comprobante #74 al número propio | Número propio verificado y cobro por plantilla según las tarifas de Meta (los mensajes de servicio dentro de las 24 h no se cobran) |
+| WhatsApp | Envío automático de comprobantes y avisos por el sandbox oficial de 360dialog, con estados por webhook e idempotencia (ver «WhatsApp real y gratuito») | Comprobantes #74 y #77 y aviso de vencimiento entregados y leídos en el teléfono propio; fallo real (401) y duplicados | Solo en las pruebas automáticas (`MensajeriaSimulada`, estado SIMULADO) | Cloud API de Meta: bloqueada (141006, 131031); el adaptador y su webhook firmado quedan listos | Producción con socios reales: Meta cobra por mensaje y exige método de pago; el sandbox es solo de prueba (25 mensajes, un destinatario) |
 | IA (Claude) | Integración con el SDK oficial y validación de la respuesta (código conservado) | — | Generación de rutinas y variantes (`ServicioIASimulado`) | Respuesta real del modelo | La API de Claude se paga por uso (créditos prepagos): no se activa |
 | Almacenamiento | Fotos y videos de incidencias en carpeta local | Local | — | Proveedor S3 compatible | Almacenamiento en la nube |
 | Base de datos y servidores | PostgreSQL 18, backend y frontend locales | Local | — | — | Hosting |
@@ -233,11 +233,91 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 
 - **Dato histórico:** el pago #76 (adhesión 9) quedó imputado a octubre por la regla anterior. No se modificó, porque su comprobante `NG-00000076` ya fue emitido (RD12).
 
+### WhatsApp real y gratuito (2026-11-17)
+
+**Alcance definido por la autora:** demostrar en desarrollo que NeuroGym envía mensajes de WhatsApp **reales, automáticos y sin intervención manual** al número propio, con costo cero. No se configura producción ni se escribe a socios reales.
+
+**Reversión de la bandeja manual (interrumpida y descartada):**
+- La migración `20261117180000_envio_whatsapp` llegó a crear la tabla `envio_whatsapp` en `neurogym_dev` y `neurogym_test`.
+- Antes de eliminarla, con autorización, se verificó:
+  - que las dos tablas tenían 0 filas;
+  - que solo las creó esa migración (15:34);
+  - que ninguna clave foránea, vista, tipo ni archivo de código dependía de ellas.
+- Se hizo un respaldo completo con `pg_dump` de ambas bases en `C:\Users\PC\Desktop\Tesis\Neurogym\respaldos\` (fuera de los repositorios).
+- En una transacción por base se eliminaron la tabla, sus dos tipos y el registro de esa migración, sin tocar nada más.
+- `schema.prisma` volvió a su versión anterior y se borró la carpeta de la migración. `prisma migrate status`: «Database schema is up to date».
+
+**Meta (WhatsApp Cloud API): no se puede destrabar gratis**, con evidencia de la API (consulta de solo lectura):
+- **La configuración es correcta:** el token ve la cuenta WABA `1116161897698484`, que contiene el número configurado `1479738001890560` («Test Number»). `account_review_status: APPROVED` y hay plantillas de prueba aprobadas.
+- **Bloqueos en el estado de salud:**
+  - Cuenta WABA bloqueada por **141006**: «There is an error with the payment method… Please add a new payment method».
+  - Portfolio bloqueado por **141010** (negocio no verificado) y **131000** (perfil incompleto: razón social, país y sitio web).
+- **El envío del panel falló** con **131031** («Business Account locked»).
+- **El asistente de soporte de Meta** indica «Falta método de pago».
+- **Contradicción con la documentación:** según Meta, los números de prueba *«don't require a payment method on file in order to send template messages»*, pero esta cuenta lo exige igual.
+- **Regla de precios:** desde el 1/10/2026, sin método de pago Meta deja de entregar incluso los mensajes de servicio.
+- **Por qué no se avanzó:**
+  - Agregar una tarjeta está prohibido por la regla de costo cero.
+  - Completar el perfil o verificar el negocio requiere datos de una empresa constituida, que no se inventan.
+- Además, la app no estaba suscripta a los webhooks de la cuenta (solo figuraba la app interna de Meta).
+- El adaptador de Meta y su webhook firmado quedan implementados por si la cuenta se habilita.
+
+**Proveedor elegido: sandbox oficial de 360dialog** (proveedor de soluciones de WhatsApp Business de Meta), según su [documentación](https://docs.360dialog.com/docs/get-started/sandbox):
+- **Cómo se obtiene la clave:** enviando START desde el WhatsApp propio. No hay registro ni tarjeta, y no existe una relación de facturación que pueda generar cargos.
+- **Límites:**
+  - un solo destinatario: el número que envió START;
+  - 25 mensajes por clave; después responde 429 y se obtiene otra con START;
+  - texto libre; solo plantillas predefinidas; no admite multimedia por id.
+- **Estados:** sent, delivered y read por webhook HTTPS. La documentación no menciona «failed».
+- **Avisos que cubre:** comprobantes y avisos de vencimiento (y los demás avisos por mensajería) como texto libre.
+
+**Implementación:**
+- **Puerto de mensajería con proveedores intercambiables** (`WHATSAPP_PROVEEDOR`): `Dialog360Sandbox`, `WhatsAppCloudApi` (Meta) y `MensajeriaSimulada`, esta última solo para las pruebas automáticas. El resultado inmediato se llama `aceptado`: un HTTP 200 nunca cuenta como enviado.
+- **Tabla `envio_mensaje`** (agregado al diccionario de datos):
+  - Cada mensaje tiene una **referencia única**: `comprobante:{id}`, `vencimiento:{cuota}:impaga|recordatorio`, `turno-evento:{id}` o `mantenimiento:…`. Un evento repetido nunca genera otro mensaje.
+  - Estados: `PREPARADO`, `ACEPTADO`, `ENVIADO`, `ENTREGADO`, `LEIDO`, `FALLIDO`, `OMITIDO` y `SIMULADO`, cada uno con su fecha.
+- **Webhooks oficiales:**
+  - `POST /api/whatsapp/webhook/360dialog/:token`, con token secreto en la ruta.
+  - `GET` y `POST /api/whatsapp/webhook/meta`, con verificación de la suscripción y firma `X-Hub-Signature-256`.
+  - Los estados no retroceden, y un `failed` tardío no pisa una entrega confirmada.
+  - `comprobante.fecha_envio` se completa solo cuando el proveedor confirma el envío.
+- **Eventos conectados:**
+  - pago aprobado (Mercado Pago, débito o efectivo) → comprobante → envío (CU-001-007);
+  - cuota vencida e impaga, y recordatorio 3 días antes (RNF10);
+  - avisos de turnos profesionales (Observer, RF42) y de mantenimiento (RF34), que ya existían.
+  - Un fallo de comunicación queda en el envío y no afecta el pago (CU-001-007 3.1).
+- **Modo de prueba (protección de desarrollo, no regla de negocio):**
+  - Solo los socios de `WHATSAPP_SOCIOS_PRUEBA` generan envíos reales, siempre al número autorizado (`WHATSAPP_TEST_RECIPIENT`, formato `549…`).
+  - El resto queda `OMITIDO`.
+  - Así no se escribe a nadie más y no se agotan los 25 mensajes.
+- **Interfaz:** el comprobante muestra el estado real («WhatsApp: leído · fecha», «enviado, entrega sin confirmar», «no se pudo enviar», «sin envío confirmado»…).
+- **Comprobantes anteriores:** tienen `fecha_envio` cargada por la simulación y no se modificaron. Como no tienen un envío confirmado, se muestran «sin envío confirmado».
+- **Comandos:** `npm run whatsapp:probar` muestra la configuración. Con `-- --webhook <URL https>` registra el webhook en el sandbox, y con `-- <pagoId>` reenvía un comprobante y sigue su estado.
+
+**Pruebas reales con el teléfono de la autora** (sandbox de 360dialog, túnel Pinggy temporal, cerrado al terminar):
+
+| Escenario | Resultado real |
+|---|---|
+| 1 · Reenvío del comprobante del pago #74 | `ACEPTADO` → webhook `ENVIADO`, `ENTREGADO`, `LEIDO` en 3 s |
+| 1 · Flujo completo: pago en efectivo registrado por el personal (#77, cuota 2026-10 de `socio4`) | Comprobante `NG-00000077` → envío automático → `ENTREGADO` → `LEIDO`; cuota `PAGADA`. En el navegador: «WhatsApp: leído · 17 de noviembre» |
+| 2 · Aviso de vencimiento por regla | Se generó la cuota 2026-12 de `socio3` (la tarea mensual la crea igual el 1/12) y se ejecutó la regla «3 días antes» con fecha 7/12: aviso `ENTREGADO` → `LEIDO`. Repetir la regla no generó otro aviso |
+| 3 · Pago rechazado (#75) | Sin comprobante y sin envío |
+| 4 · Falla de WhatsApp | Con una clave inválida, solo para esa ejecución, 360dialog respondió 401 y el envío quedó `FALLIDO` con el motivo; el pago #74 y su cuota no cambiaron |
+| 5 · Duplicados | Webhook `ENTREGADO` real recibido dos veces (el segundo, sin cambios). Regreso de Mercado Pago del #74 repetido: `duplicado`, 1 comprobante y ningún envío nuevo |
+
+- **Pruebas automáticas:** backend 161 (7 de integración de envíos, 6 de proveedores y webhooks) y frontend 23.
+
+**Limitaciones:**
+- El sandbox solo escribe al número que envió START y admite 25 mensajes por clave.
+- No documenta el estado `failed`: un fallo se ve en la respuesta de la API (401, 403 o 429).
+- Recibir los estados requiere una URL HTTPS pública (túnel temporal en desarrollo).
+- Para producción con socios reales, WhatsApp exige un número propio verificado y cobra por mensaje (plantillas fuera de la ventana de 24 h), con un método de pago. Eso queda fuera del alcance académico definido.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
    - Mercado Pago: **completado el 2026-11-17** (aprobado, rechazado, webhook, adhesión, primer débito y baja). Queda opcional regenerar la clave del webhook en el panel de prueba, porque apareció en una captura, y actualizar `MP_WEBHOOK_SECRET`. Para volver a recibir webhooks hay que abrir otro túnel y actualizar la URL en el panel.
-   - WhatsApp: crear la app gratuita en Meta for Developers con el producto WhatsApp, habilitar el número propio como destinatario y cargar en `.env` el token temporal, el id del número de prueba y `WHATSAPP_TEST_RECIPIENT`. Después, escribirle al número de prueba y ejecutar `npm run whatsapp:probar -- 74`.
+   - WhatsApp: **completado el 2026-11-17 con el sandbox de 360dialog** (ver «WhatsApp real y gratuito»). Para repetir las pruebas: clave nueva con START si se agotan los 25 mensajes, túnel HTTPS y `npm run whatsapp:probar -- --webhook <URL>`.
    - Claude queda simulado, porque requiere créditos pagos.
    - **Funcionalidades no verificadas por completo (no se dan por terminadas):**
      - NeuroGym Intelligence: la estimación de riesgo es un puntaje por reglas (caída de frecuencia, ausencia, cuota impaga), no un modelo entrenado; revisar contra el TFI. La retención mensual en porcentaje no se calcula. ETL, señales, Excel y propuestas tienen pruebas automáticas; en el navegador no se guardó ninguna decisión.
