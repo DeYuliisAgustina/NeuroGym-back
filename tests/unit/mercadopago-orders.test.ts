@@ -1,6 +1,6 @@
-import { Order } from 'mercadopago';
+import { Order, User } from 'mercadopago';
 import type { OrderResponse } from 'mercadopago/dist/clients/order/commonTypes';
-import { armarOrdenCheckoutPro, interpretarOrden, MercadoPagoApiGateway } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
+import { armarOrdenCheckoutPro, esCuentaDePrueba, interpretarOrden, MercadoPagoApiGateway } from '../../src/integrations/mercadopago/MercadoPagoApiGateway';
 
 const solicitud = { pagoId: 42, descripcion: 'Cuota NeuroGym 2026-11', importe: 44000, emailPagador: 'socio@prueba.local' };
 const orden = (datos: Partial<OrderResponse>) => ({ id: 'ORD01TEST', external_reference: 'pago:42', ...datos }) as OrderResponse;
@@ -74,8 +74,26 @@ describe('Mercado Pago: pago único con la API de Orders (Checkout Pro)', () => 
 
   it('con credenciales productivas no crea órdenes', async () => {
     const crear = vi.spyOn(Order.prototype, 'create');
-    vi.spyOn((await import('mercadopago')).User.prototype, 'get').mockResolvedValue({ id: 1, tags: ['normal'] } as never);
+    vi.spyOn(User.prototype, 'get').mockResolvedValue({ id: 1, tags: ['normal'] } as never);
     await expect(new MercadoPagoApiGateway('APP_USR-productiva').crearPago(solicitud)).rejects.toMatchObject({ codigo: 'MP_CREDENCIAL_PRODUCTIVA' });
     expect(crear).not.toHaveBeenCalled();
+  });
+});
+
+describe('Mercado Pago: credenciales de prueba de la API de Orders (prefijo APP_USR)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('reconoce la cuenta de prueba por etiqueta, apodo o correo de prueba', () => {
+    expect(esCuentaDePrueba({ tags: ['normal', 'test_user'] })).toBe(true);
+    expect(esCuentaDePrueba({ tags: ['normal'], nickname: 'TESTUSER1234567890' })).toBe(true);
+    expect(esCuentaDePrueba({ tags: [], email: 'test_user_123@testuser.com' })).toBe(true);
+    expect(esCuentaDePrueba({ tags: ['normal'], nickname: 'GIMNASIO_REAL', email: 'cuenta@ejemplo.com' })).toBe(false);
+    expect(esCuentaDePrueba({})).toBe(false);
+  });
+
+  it('acepta un Access Token APP_USR de una cuenta de prueba y crea la orden', async () => {
+    vi.spyOn(User.prototype, 'get').mockResolvedValue({ id: 1, nickname: 'TESTUSER987654321', tags: ['normal'] } as never);
+    vi.spyOn(Order.prototype, 'create').mockResolvedValue(orden({ checkout_url: 'https://www.mercadopago.com.ar/checkout/v1/redirect?order_id=ORD01TEST' }));
+    await expect(new MercadoPagoApiGateway('APP_USR-de-prueba').crearPago(solicitud)).resolves.toContain('order_id=ORD01TEST');
   });
 });

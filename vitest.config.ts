@@ -12,7 +12,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts', 'src/jobs/ejecutar-etl.ts', 'src/jobs/supresion-datos.ts'],
+      exclude: ['src/index.ts', 'src/jobs/ejecutar-etl.ts', 'src/jobs/supresion-datos.ts', 'src/jobs/verificar-mercadopago.ts'],
       reporter: ['text', 'html', 'json-summary'],
     },
   },

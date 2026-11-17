@@ -15,6 +15,15 @@ const valor = (v: unknown) => (Array.isArray(v) ? v[0] : v) as string | undefine
 const importe = (n: number) => n.toFixed(2);
 
 /**
+ * Una cuenta de prueba de Mercado Pago Developers se reconoce por la etiqueta
+ * test_user, por el apodo TESTUSER… o por el correo @testuser.com que Mercado
+ * Pago les asigna. Cualquier otra cuenta se trata como productiva.
+ */
+export function esCuentaDePrueba(usuario: { tags?: string[]; nickname?: string; email?: string }): boolean {
+  return Boolean(usuario.tags?.includes('test_user') || /^TESTUSER/i.test(usuario.nickname ?? '') || /@testuser\.com$/i.test(usuario.email ?? ''));
+}
+
+/**
  * Cuerpo de la orden de Checkout Pro (API de Orders). Para Checkout Pro la
  * documentación oficial exige type "online" y processing_mode "manual"; el
  * total debe coincidir con la suma de los ítems.
@@ -81,12 +90,14 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
    * Las credenciales de prueba de la aplicación empiezan con TEST-; las de una
    * cuenta de prueba (vendedor de prueba) pertenecen a un usuario con la
    * etiqueta test_user. Cualquier otra credencial se considera productiva.
+   * Con la API de Orders, el Access Token de prueba empieza con APP_USR (igual
+   * que el productivo): por eso se consulta a qué cuenta pertenece.
    */
   verificarModoPrueba(): Promise<void> {
     this.verificacion ??= (async () => {
       if (this.accessToken.startsWith('TEST-')) return;
       const usuario = await new User(this.config).get();
-      if (!usuario.tags?.includes('test_user')) {
+      if (!esCuentaDePrueba(usuario)) {
         this.verificacion = null;
         throw new ErrorApp(503, 'MP_CREDENCIAL_PRODUCTIVA', 'NeuroGym solo opera con credenciales de prueba de Mercado Pago Developers');
       }

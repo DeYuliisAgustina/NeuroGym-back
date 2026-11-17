@@ -32,7 +32,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **120 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas 6 nuevas de la API de Orders.
+- Backend `npm test`: **122 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas 8 nuevas de la API de Orders y de credenciales `APP_USR` de prueba.
 - Frontend `npm test`: **18 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
@@ -50,7 +50,8 @@ Mercado Pago marca la API de Preferences como camino no recomendado (sin fecha d
 
 - **Cambió:** `MercadoPagoApiGateway` crea la orden (`POST /v1/orders`, `type: online`, `processing_mode: manual`, `external_reference: pago:{id}`, clave de idempotencia) y redirige con `checkout_url`; el webhook atiende el evento `order` y consulta `GET /v1/orders/{id}`; el retorno llega a `/socio/pagos?resultado=...&pago={id}` y el backend busca la orden por su referencia (verificando que el pago sea del socio). Estados: `processed`/`accredited` = aprobado; `failed` y `canceled` = rechazado; `created`, `processing` y `action_required` = todavía sin registrar. Se guarda como referencia el id del último pago de la orden.
 - **No cambió:** reglas de negocio, importes (pago único a precio de lista, 10 % solo por débito automático), `CobroPagoUnico` (Strategy), `registrarResultado` (Facade), comprobantes, WhatsApp, idempotencia, efectivo y el **débito automático con Suscripciones (PreApproval)**, que sigue independiente.
-- **Configuración en Mercado Pago Developers (la hace la autora):** aplicación Checkout Pro con **API de Orders**; cuentas de prueba vendedora y compradora; Access Token de la vendedora de prueba en `MP_ACCESS_TOKEN` (el backend acepta credenciales `TEST-` o de un usuario de prueba y rechaza las productivas); webhooks en modo Prueba con los eventos **Order (Mercado Pago)** y **Planes y suscripciones** en `/api/pagos/webhook`; clave en `MP_WEBHOOK_SECRET`; correo de la compradora en `MP_TEST_PAYER_EMAIL`. Las credenciales quedan solo en `.env`, que Git ignora.
+- **Configuración en Mercado Pago Developers (la hace la autora):** aplicación **NeuroGym** con Checkout Pro y **API de Orders**. Al crearla, Mercado Pago genera la cuenta vendedora de prueba y sus credenciales de prueba, cuyo Access Token empieza con `APP_USR` (igual que el productivo). Ese token va en `MP_ACCESS_TOKEN`; el backend lo acepta solo si pertenece a una cuenta de prueba (etiqueta `test_user`, apodo `TESTUSER…` o correo `@testuser.com`) y rechaza las productivas. `npm run mp:verificar` lo comprueba sin mostrar secretos. Webhooks en modo Prueba con los eventos **Order (Mercado Pago)** y **Planes y suscripciones** en `/api/pagos/webhook`; clave en `MP_WEBHOOK_SECRET`. Las credenciales quedan solo en `.env`, que Git ignora.
+- **Cuentas de prueba:** el **pago único** con tarjeta se prueba sin cuenta compradora (ventana de incógnito, sin sesión de Mercado Pago, tarjetas de prueba y titular APRO u OTHE). Solo el **débito automático** (Suscripciones) necesita una cuenta **compradora** de prueba del mismo país: su correo va en `MP_TEST_PAYER_EMAIL` y se inicia sesión con ella para autorizar la adhesión.
 
 ### Pendiente
 

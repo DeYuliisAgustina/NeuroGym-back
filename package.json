@@ -21,6 +21,7 @@
     "db:reset": "prisma migrate reset --force",
     "etl": "tsx src/jobs/ejecutar-etl.ts",
     "supresion": "tsx src/jobs/supresion-datos.ts",
+    "mp:verificar": "tsx src/jobs/verificar-mercadopago.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
