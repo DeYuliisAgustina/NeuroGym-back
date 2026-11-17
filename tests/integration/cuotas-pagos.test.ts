@@ -82,6 +82,18 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-rech', aprobado: false });
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PENDIENTE');
     expect((await prisma.pago.findUniqueOrThrow({ where: { id: body.pagoId } })).estado).toBe('RECHAZADO');
+
+    // Reintento en la misma orden de Mercado Pago: otro rechazo y luego la aprobación.
+    await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-rech-2', aprobado: false });
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PENDIENTE');
+    const aprobado = await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-reintento-ok', aprobado: true });
+    expect(aprobado).toMatchObject({ procesado: true, pagoId: body.pagoId });
+    expect(await prisma.pago.findUniqueOrThrow({ where: { id: body.pagoId } })).toMatchObject({ estado: 'APROBADO', referenciaExterna: 'MP-reintento-ok' });
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
+    // La notificación repetida del rechazo anterior ya no cambia nada.
+    const viejo = await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-rech-3', aprobado: false });
+    expect(viejo.duplicado).toBe(true);
+    expect((await prisma.pago.findUniqueOrThrow({ where: { id: body.pagoId } })).estado).toBe('APROBADO');
   });
 
   it('6.1: si falla WhatsApp, la cuota queda pagada y el comprobante en el historial', async () => {
@@ -103,8 +115,10 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(await prisma.comprobante.count({ where: { pagoId: body.pagoId } })).toBe(1);
     expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).not.toBeNull();
     // Un pago no aprobado no tiene comprobante para reenviar.
-    const rechazado = await prisma.pago.findFirstOrThrow({ where: { estado: 'RECHAZADO' } });
-    await expect(cuotaService.reenviarComprobante(rechazado.id)).rejects.toMatchObject({ status: 404 });
+    const otro = await crearSocio(g.sedeA.id);
+    const otraCuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: otro.id } });
+    const pendiente = await request(app).post(`/api/cuotas/${otraCuota.id}/pagos`).set(conToken(otro.token)).send({ medio: 'PAGO_UNICO' });
+    await expect(cuotaService.reenviarComprobante(pendiente.body.pagoId)).rejects.toMatchObject({ status: 404 });
   });
 
   it('CU-001-004 y débito: adhesión autorizada, débito con 10 % y baja de la adhesión', async () => {

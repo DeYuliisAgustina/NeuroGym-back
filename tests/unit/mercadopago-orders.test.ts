@@ -42,6 +42,11 @@ describe('Mercado Pago: pago único con la API de Orders (Checkout Pro)', () => 
     expect(interpretarOrden(orden({ status: 'canceled', status_detail: 'canceled' }))).toMatchObject({ aprobado: false, referenciaExterna: 'ORD01TEST' });
     // Orden abierta o en revisión: todavía no hay resultado que registrar.
     for (const status of ['created', 'processing', 'action_required']) expect(interpretarOrden(orden({ status }))).toBeNull();
+    // Intento rechazado con la orden abierta para reintentar (estado real observado con titular OTHE).
+    expect(
+      interpretarOrden(orden({ status: 'action_required', status_detail: 'waiting_retry', transactions: { payments: [{ id: 'PAY01F', status: 'failed', status_detail: 'rejected_by_issuer' }] } })),
+    ).toEqual({ tipo: 'PAGO', pagoId: 42, referenciaExterna: 'PAY01F', aprobado: false });
+    expect(interpretarOrden(orden({ status: 'action_required', status_detail: 'waiting_retry', transactions: { payments: [{ id: 'PAY01G', status: 'action_required' }] } }))).toBeNull();
     // Reembolso parcial y órdenes ajenas a las cuotas no se registran como pagos aprobados.
     expect(interpretarOrden(orden({ status: 'processed', status_detail: 'partially_refunded' }))).toBeNull();
     expect(interpretarOrden(orden({ status: 'processed', external_reference: 'otro:1' }))).toBeNull();

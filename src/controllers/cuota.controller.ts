@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { cuotaService } from '../patterns/facade';
 import { destinoRetornoAdhesion } from '../integrations/mercadopago/MercadoPagoApiGateway';
+import { env } from '../config/env';
 import { cobranzaService } from '../services/cobranza.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { aFechaDb } from '../utils/fechas';
@@ -66,7 +67,10 @@ export const cuotaController = {
   // ---------------- Mercado Pago ----------------
   /** Webhook de Mercado Pago: responde 200 rápido; la firma se valida en la fachada. */
   async webhook(req: Request, res: Response) {
+    const cuerpo = (req.body ?? {}) as { type?: string; action?: string };
     const resultado = await cuotaService.procesarWebhook({ encabezados: req.headers, query: req.query as Record<string, unknown>, cuerpo: req.body });
+    // Registro de desarrollo para verificar la recepción (sin firmas, ids ni datos personales).
+    if (env.nodeEnv === 'development') console.log(`[Mercado Pago] webhook ${cuerpo.type ?? req.query.type ?? '?'} ${cuerpo.action ?? ''} →`, JSON.stringify(resultado));
     res.json(resultado);
   },
 
@@ -81,12 +85,12 @@ export const cuotaController = {
     res.json(await cuotaService.confirmarRetornoAdhesion(datos.preapprovalId!, socioId));
   },
 
-  /** Estado de la integración, visible en la defensa (sin datos sensibles). */
   /** Regreso local de la autorización del débito: solo redirige al frontend (no registra nada). */
   retornoAdhesion(req: Request, res: Response) {
     res.redirect(302, destinoRetornoAdhesion(req.query.preapproval_id));
   },
 
+  /** Estado de la integración, visible en la defensa (sin datos sensibles). */
   async estadoIntegracion(_req: Request, res: Response) {
     res.json({ mercadoPago: cuotaService.modoIntegracion });
   },

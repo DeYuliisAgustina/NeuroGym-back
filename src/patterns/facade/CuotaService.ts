@@ -239,7 +239,9 @@ export class CuotaService {
       const existente = await cuotaRepository.pagoPorReferencia(op.referenciaExterna, tx);
       if (existente) return { procesado: false, duplicado: true, pagoId: existente.id, aprobado: false };
       const pago = await tx.pago.findUnique({ where: { id: op.pagoId } });
-      if (!pago || pago.medio !== 'PAGO_UNICO' || pago.estado !== 'PENDIENTE') {
+      // RECHAZADO admite un nuevo resultado: el socio puede reintentar en la misma
+      // orden de Mercado Pago (cada intento tiene su propia referencia).
+      if (!pago || pago.medio !== 'PAGO_UNICO' || (pago.estado !== 'PENDIENTE' && pago.estado !== 'RECHAZADO')) {
         return { procesado: false, duplicado: true, pagoId: pago?.id, aprobado: false };
       }
       await cuotaRepository.bloquear(pago.cuotaId, tx);

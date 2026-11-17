@@ -98,7 +98,11 @@ export function interpretarOrden(orden: OrderResponse): ResultadoOperacion | nul
   // Cada intento de cobro es un pago distinto dentro de la orden; se toma el último.
   const ultimo = pagos.at(-1);
   const aprobada = orden.status === 'processed' && (orden.status_detail ?? 'accredited') === 'accredited';
-  const rechazada = orden.status === 'failed' || orden.status === 'canceled';
+  // Un intento rechazado no cierra la orden: queda action_required/waiting_retry
+  // (verificado en el entorno de prueba con titular OTHE) para que el comprador
+  // reintente. Se registra el rechazo; si luego reintenta y paga, se aprueba.
+  const rechazoReintentable = orden.status === 'action_required' && orden.status_detail === 'waiting_retry' && ultimo?.status === 'failed';
+  const rechazada = orden.status === 'failed' || orden.status === 'canceled' || rechazoReintentable;
   if (!aprobada && !rechazada) return null;
   return { tipo: 'PAGO', pagoId, referenciaExterna: String(ultimo?.id ?? orden.id), aprobado: aprobada };
 }
@@ -185,18 +189,38 @@ export class MercadoPagoApiGateway implements MercadoPagoGateway {
   /** Validador oficial del SDK: HMAC-SHA256 de "id:...;request-id:...;ts:...;". */
   validarWebhook({ encabezados, query, cuerpo }: NotificacionEntrante): boolean {
     if (!env.mercadoPago.webhookSecret) return false;
-    try {
-      WebhookSignatureValidator.validate({
-        xSignature: valor(encabezados['x-signature']),
-        xRequestId: valor(encabezados['x-request-id']),
-        dataId: valor(query['data.id']) ?? (cuerpo as { data?: { id?: string } })?.data?.id,
-        secret: env.mercadoPago.webhookSecret,
-      });
-      return true;
-    } catch (error) {
-      if (env.nodeEnv !== 'test') console.warn('[Mercado Pago] Firma de webhook rechazada:', (error as { reason?: string }).reason);
-      return false;
+    const idQuery = valor(query['data.id']);
+    const idCuerpo = (cuerpo as { data?: { id?: string } })?.data?.id;
+    const dataId = idQuery ?? idCuerpo;
+    // Primero el id tal como llega; luego en minúsculas (ids alfanuméricos de Orders).
+    const candidatos = [...new Set([dataId, dataId?.toLowerCase()])];
+    let motivo: string | undefined;
+    for (const [i, candidato] of candidatos.entries()) {
+      try {
+        WebhookSignatureValidator.validate({
+          xSignature: valor(encabezados['x-signature']),
+          xRequestId: valor(encabezados['x-request-id']),
+          dataId: candidato,
+          secret: env.mercadoPago.webhookSecret,
+        });
+        if (i > 0 && env.nodeEnv !== 'test') console.log('[Mercado Pago] Firma válida con data.id en minúsculas');
+        return true;
+      } catch (error) {
+        motivo = (error as { reason?: string }).reason;
+      }
     }
+    if (env.nodeEnv !== 'test') {
+      // Diagnóstico sin secretos: forma de la notificación, nunca la firma ni la clave.
+      console.warn('[Mercado Pago] Firma de webhook rechazada:', motivo, JSON.stringify({
+        origenId: idQuery ? 'query' : idCuerpo ? 'cuerpo' : 'ninguno',
+        mayusculas: /[A-Z]/.test(dataId ?? ''),
+        queryIgualCuerpo: idQuery !== undefined && idCuerpo !== undefined ? idQuery === idCuerpo : null,
+        parametros: Object.keys(query),
+        requestId: Boolean(valor(encabezados['x-request-id'])),
+        tipo: (cuerpo as { type?: string })?.type ?? query.type ?? query.topic,
+      }));
+    }
+    return false;
   }
 
   async interpretarNotificacion({ query, cuerpo }: NotificacionEntrante): Promise<ResultadoOperacion | null> {

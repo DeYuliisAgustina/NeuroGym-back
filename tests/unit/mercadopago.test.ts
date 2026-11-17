@@ -34,6 +34,13 @@ describe('Integración Mercado Pago (sin red)', () => {
     expect(gateway.validarWebhook({ ...notificacion(''), encabezados: {} })).toBe(false);
   });
 
+  it('ids alfanuméricos de Orders: acepta la firma calculada con el id tal cual o en minúsculas', () => {
+    const id = 'ORDTST01ABC';
+    expect(gateway.validarWebhook(notificacion(firmar('secreto-de-prueba', id, 'req-1', '1742505638'), id))).toBe(true);
+    expect(gateway.validarWebhook(notificacion(firmar('secreto-de-prueba', id.toLowerCase(), 'req-1', '1742505638'), id))).toBe(true);
+    expect(gateway.validarWebhook(notificacion(firmar('otro-secreto', id.toLowerCase(), 'req-1', '1742505638'), id))).toBe(false);
+  });
+
   it('un token TEST- se reconoce como credencial de prueba sin consultar la API', async () => {
     await expect(gateway.verificarModoPrueba()).resolves.toBeUndefined();
   });
