@@ -93,6 +93,18 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     mensajeria.fallar = false;
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
     expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).toBeNull();
+
+    // Reenvío posterior (npm run whatsapp:probar): repite solo el mensaje, sin nuevos pagos ni comprobantes.
+    const enviadosAntes = mensajeria.enviados.length;
+    await expect(cuotaService.reenviarComprobante(body.pagoId)).resolves.toEqual({ enviado: true, error: undefined });
+    expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
+    expect(mensajeria.enviados.at(-1)?.texto).toContain(`Cuota ${cuota.periodo}`);
+    expect(await prisma.pago.count({ where: { cuotaId: cuota.id } })).toBe(1);
+    expect(await prisma.comprobante.count({ where: { pagoId: body.pagoId } })).toBe(1);
+    expect((await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: body.pagoId } })).fechaEnvio).not.toBeNull();
+    // Un pago no aprobado no tiene comprobante para reenviar.
+    const rechazado = await prisma.pago.findFirstOrThrow({ where: { estado: 'RECHAZADO' } });
+    await expect(cuotaService.reenviarComprobante(rechazado.id)).rejects.toMatchObject({ status: 404 });
   });
 
   it('CU-001-004 y débito: adhesión autorizada, débito con 10 % y baja de la adhesión', async () => {

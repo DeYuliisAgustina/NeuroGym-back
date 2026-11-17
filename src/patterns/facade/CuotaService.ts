@@ -325,7 +325,19 @@ export class CuotaService {
   }
 
   /** CU-001-007 paso 3: envío por WhatsApp. Si falla, el comprobante queda en el historial (3.1). */
-  private async enviarComprobante(pagoId: number): Promise<boolean> {
+  /**
+   * Reenvía por mensajería el comprobante de un pago ya aprobado. No crea pagos
+   * ni comprobantes ni consulta a Mercado Pago: solo repite el envío.
+   */
+  async reenviarComprobante(pagoId: number): Promise<{ enviado: boolean; error?: string }> {
+    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    if (!pago?.comprobante || pago.estado !== 'APROBADO') throw noEncontrado('Comprobante');
+    let error: string | undefined;
+    const enviado = await this.enviarComprobante(pagoId, { avisoInterno: false, alFallar: (e) => (error = e) });
+    return { enviado, error };
+  }
+
+  private async enviarComprobante(pagoId: number, opciones: { avisoInterno?: boolean; alFallar?: (error?: string) => void } = {}): Promise<boolean> {
     const pago = await cuotaRepository.comprobanteDePago(pagoId);
     if (!pago?.comprobante) return false;
     const { socio } = pago.cuota;
@@ -333,9 +345,14 @@ export class CuotaService {
       `NeuroGym - Comprobante ${pago.comprobante.numero}\n` +
       `Cuota ${pago.cuota.periodo} · ${pago.medio.replace('_', ' ').toLowerCase()}\n` +
       `Importe abonado: $${aNumero(pago.importe).toFixed(2)} · ${fechaIso(pago.fecha)}`;
-    await notificacionService.notificar({ usuarioId: socio.usuarioId, tipo: 'PAGO', mensaje: `Pago confirmado: cuota ${pago.cuota.periodo}.` });
+    if (opciones.avisoInterno !== false) {
+      await notificacionService.notificar({ usuarioId: socio.usuarioId, tipo: 'PAGO', mensaje: `Pago confirmado: cuota ${pago.cuota.periodo}.` });
+    }
     const resultado = await this.mensajeria.enviar(socio.telefono, texto);
-    if (!resultado.enviado) return false;
+    if (!resultado.enviado) {
+      opciones.alFallar?.(resultado.error);
+      return false;
+    }
     await prisma.$transaction([
       prisma.comprobante.update({ where: { id: pago.comprobante.id }, data: { fechaEnvio: new Date() } }),
       prisma.notificacion.create({ data: { usuarioId: socio.usuarioId, tipo: 'PAGO', canal: 'MENSAJERIA', mensaje: texto } }),

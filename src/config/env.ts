@@ -44,6 +44,11 @@ export const env = {
   mensajeria: {
     whatsappToken: process.env.WHATSAPP_TOKEN ?? '',
     whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? '',
+    // Versión de Graph API (la documentación oficial de Cloud API usa v23.0).
+    apiVersion: process.env.WHATSAPP_API_VERSION ?? 'v23.0',
+    // Fuera de producción TODOS los mensajes van solo a este número (habilitado en el
+    // número de prueba de Meta). Sin él no se envía nada: nunca a teléfonos de socios.
+    destinoPrueba: process.env.WHATSAPP_TEST_RECIPIENT ?? '',
     get simulado() {
       return !this.whatsappToken || !this.whatsappPhoneNumberId;
     },

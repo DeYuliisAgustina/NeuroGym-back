@@ -22,6 +22,7 @@
     "etl": "tsx src/jobs/ejecutar-etl.ts",
     "supresion": "tsx src/jobs/supresion-datos.ts",
     "mp:verificar": "tsx src/jobs/verificar-mercadopago.ts",
+    "whatsapp:probar": "tsx src/jobs/probar-whatsapp.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

@@ -32,7 +32,7 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **125 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas 11 de la API de Orders, credenciales `APP_USR` de prueba y errores de la API.
+- Backend `npm test`: **131 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas 12 de la API de Orders y del regreso del débito, 5 del modo de prueba de WhatsApp y el reenvío del comprobante sin duplicar.
 - Frontend `npm test`: **18 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
@@ -52,17 +52,45 @@ Mercado Pago marca la API de Preferences como camino no recomendado (sin fecha d
 - **Cambió:** `MercadoPagoApiGateway` crea la orden (`POST /v1/orders`, `type: online`, `processing_mode: manual`, `external_reference: pago-{id}`, clave de idempotencia) y redirige con `checkout_url`; el webhook atiende el evento `order` y consulta `GET /v1/orders/{id}`; el retorno llega a `/socio/pagos?resultado=...&pago={id}` y el backend busca la orden por su referencia (verificando que el pago sea del socio). Estados: `processed`/`accredited` = aprobado; `failed` y `canceled` = rechazado; `created`, `processing` y `action_required` = todavía sin registrar. Se guarda como referencia el id del último pago de la orden.
 - **No cambió:** reglas de negocio, importes (pago único a precio de lista, 10 % solo por débito automático), `CobroPagoUnico` (Strategy), `registrarResultado` (Facade), comprobantes, WhatsApp, idempotencia, efectivo y el **débito automático con Suscripciones (PreApproval)**, que sigue independiente.
 - **Configuración en Mercado Pago Developers (la hace la autora):** aplicación **NeuroGym** con Checkout Pro y **API de Orders**. Al crearla, Mercado Pago genera la cuenta vendedora de prueba y sus credenciales de prueba, cuyo Access Token empieza con `APP_USR` (igual que el productivo). Ese token va en `MP_ACCESS_TOKEN`; el backend lo acepta solo si pertenece a una cuenta de prueba (etiqueta `test_user`, apodo `TESTUSER…` o correo `@testuser.com`) y rechaza las productivas. `npm run mp:verificar` lo comprueba sin mostrar secretos. Webhooks en modo Prueba con los eventos **Order (Mercado Pago)** y **Planes y suscripciones** en `/api/pagos/webhook`; clave en `MP_WEBHOOK_SECRET`. Las credenciales quedan solo en `.env`, que Git ignora.
-- **Cuentas de prueba:** el **pago único** con tarjeta se prueba sin cuenta compradora (ventana de incógnito, sin sesión de Mercado Pago, tarjetas de prueba y titular APRO u OTHE). Solo el **débito automático** (Suscripciones) necesita una cuenta **compradora** de prueba del mismo país: su correo va en `MP_TEST_PAYER_EMAIL` y se inicia sesión con ella para autorizar la adhesión.
+- **Cuentas de prueba:** hace falta una cuenta **compradora** de prueba del mismo país (MLA), creada en Mercado Pago Developers → Cuentas de prueba. **Pago único:** si en el checkout se usa el correo de una cuenta real de Mercado Pago, la API responde el error 145 ("Una de las partes con la que intentás hacer el pago es de prueba"), y la orden queda `created` sin pagos. Hay que pagar como invitado con el **correo de la compradora de prueba**, tarjeta de prueba y titular APRO u OTHE. **Débito automático:** su correo va en `MP_TEST_PAYER_EMAIL` y se inicia sesión con esa cuenta para autorizar la adhesión.
+
+### Integraciones externas con servicios gratuitos (2026-11-17)
+
+Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (Mercado Pago Developers en modo prueba, número de prueba de Meta, PostgreSQL y almacenamiento locales, túneles temporales gratuitos solo para webhooks). Sin planes pagos, cobros reales ni producción.
+
+**Primer pago único aprobado con Orders: verificado (2026-11-17).** Socio de prueba `socio3`, cuota 2026-11, compradora de prueba y tarjeta APRO. Se comprobó lo siguiente en PostgreSQL y en la API de Orders del entorno de prueba (consulta de solo lectura):
+- Pago #74 `APROBADO`, $32.000, referencia = id del pago de Mercado Pago (`PAY01…`). La orden quedó en `processed/accredited`, total 32000.00, con un solo pago `processed/accredited` de 32000.
+- Cuota 2026-11 en `PAGADA`, con un único pago aprobado. Comprobante `NG-00000074` emitido y marcado como enviado, por mensajería **simulada** (WhatsApp sin credenciales).
+- Sin duplicados en toda la base: 0 referencias externas repetidas, 0 cuotas con más de un pago aprobado, 0 pagos con más de un comprobante.
+- Los pagos #72 y #73 (mismo socio) son los intentos con error 145: quedaron `PENDIENTE` y sus órdenes en `created`, sin pagos. No se tocaron. Si alguien pagara ahora una de esas órdenes, `registrarPagoUnico` lo detecta (la cuota ya está `PAGADA`), no aprueba un segundo pago y deja auditoría `PAGO_SOBRE_CUOTA_PAGADA` para la devolución manual.
+- No se repite: queda como la prueba de pago único aprobado.
+
+**Débito automático (Suscripciones): verificación del lado del servidor, sin cobro.** Una sonda creó una suscripción `pending`, sin tarjeta, para `socio5`. Resultado: importe 28.800 ARS (cuota de $32.000 con 10 % de descuento), mensual, referencia `socio:5` (Suscripciones sí admite ":") y pagador = compradora de prueba. Después se canceló por API y quedó `cancelled`. **Error encontrado:** Suscripciones rechaza `back_url` con host `localhost` (HTTP 400 "Invalid value for back_url"), pero acepta `127.0.0.1`, y Vite solo escucha en `localhost`. Corrección: sin URL pública, el `back_url` es `http://127.0.0.1:3000/api/pagos/retorno-adhesion`, que solo redirige a `localhost:5173/socio/pagos?resultado=adhesion&preapproval_id=…` (no registra nada, valida el id). La adhesión se confirma con el mismo camino que antes.
+
+**WhatsApp Business Cloud API: preparado para el número de prueba gratuito de Meta.**
+- Fuera de producción, cada mensaje va **solo** a `WHATSAPP_TEST_RECIPIENT` (el número propio, habilitado en el número de prueba). Si esa variable falta, no se envía nada: nunca a teléfonos de socios.
+- Graph API configurable (`WHATSAPP_API_VERSION`, v23.0 por defecto, la que usa la documentación oficial). Los errores frecuentes se informan con su código y sin el token: 131030 destinatario no habilitado, 131047 fuera de la ventana de 24 h, 190 token vencido.
+- `npm run whatsapp:probar` verifica la configuración y el número emisor. `npm run whatsapp:probar -- 74` reenvía el comprobante del pago #74 (`CuotaService.reenviarComprobante`, solo pagos aprobados): no crea pagos ni comprobantes ni consulta a Mercado Pago.
+- Limitación de Meta: un texto libre (el comprobante) solo se entrega dentro de las 24 h siguientes a un mensaje del destinatario. Por eso, antes de la prueba hay que escribirle al número de prueba desde el WhatsApp propio. Fuera de esa ventana se exigen plantillas aprobadas, y la única disponible sin trámite es `hello_world`, que no lleva el comprobante.
+
+**Estado por integración**
+
+| Integración | Funciona de verdad | Verificado con servicios gratuitos de prueba | Solo simulado | Pendiente de validar | Requeriría servicio pago en producción |
+|---|---|---|---|---|---|
+| Mercado Pago, pago único (Orders) | Creación de la orden, checkout, regreso, confirmación por API, cuota PAGADA, comprobante, idempotencia | Pago aprobado #74 de punta a punta; orden y búsqueda por referencia | — | Pago rechazado (OTHE); webhook `order` firmado | Credenciales productivas y cuenta real del gimnasio; Mercado Pago cobra comisión por cada pago real (sin abono mensual) |
+| Mercado Pago, débito automático (Suscripciones) | Creación de la suscripción con 10 %, referencia, cancelación por API | Sonda `pending` → `cancelled`, sin cobro | — | Autorización con la compradora de prueba, regreso, registro de la adhesión, baja desde la app, webhook de suscripción. Mercado Pago no garantiza cobros mensuales en prueba | Igual que el pago único (comisión por débito real) |
+| Webhooks de Mercado Pago | Validación de firma (SDK oficial) e interpretación, con pruebas automáticas | — | — | Recepción real: túnel HTTPS gratuito, URL y clave en el panel de prueba | URL pública HTTPS (hosting) |
+| WhatsApp Cloud API | Adaptador real, destinatario de prueba obligatorio, reenvío del comprobante | — (faltan las credenciales de Meta) | Hoy todos los envíos (`MensajeriaSimulada`) | Envío real del comprobante #74 al número propio | Número propio verificado y cobro por plantilla según las tarifas de Meta (los mensajes de servicio dentro de las 24 h no se cobran) |
+| IA (Claude) | Integración con el SDK oficial y validación de la respuesta (código conservado) | — | Generación de rutinas y variantes (`ServicioIASimulado`) | Respuesta real del modelo | La API de Claude se paga por uso (créditos prepagos): no se activa |
+| Almacenamiento | Fotos y videos de incidencias en carpeta local | Local | — | Proveedor S3 compatible | Almacenamiento en la nube |
+| Base de datos y servidores | PostgreSQL 18, backend y frontend locales | Local | — | — | Hosting |
 
 ### Pendiente
 
-1. **Probar Mercado Pago con credenciales de prueba.** Nada de esto está verificado contra la API real:
-   - pago único aprobado (titular APRO) y rechazado (OTHE) desde el navegador: retorno, confirmación de la orden, estado de la cuota y comprobante. **Ya verificado:** creación de la orden y `checkout_url` en el entorno de prueba, y búsqueda por referencia;
-   - débito automático: su referencia `socio:{id}` usa la API de Suscripciones (otra API); verificar si la acepta al probarlo;
-   - webhook `order` firmado y reenviado sin duplicar, y que la búsqueda por `external_reference` responda en el entorno de prueba;
-   - débito automático: adhesión con la cuenta compradora, importe con 10 % y baja. Mercado Pago no garantiza cobros mensuales en prueba; si no se generan, queda documentado como no verificado;
-   - URL HTTPS para el webhook (túnel de desarrollo).
-   - WhatsApp Cloud API y Claude (`ANTHROPIC_API_KEY`) solo funcionan simulados; falta verificarlos con credenciales.
+1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
+   - Mercado Pago: pago rechazado (OTHE) con la compradora de prueba; autorizar el débito con la compradora de prueba y darlo de baja desde la app; webhook (URL del túnel y clave en el panel de prueba, más "Simular notificación").
+   - WhatsApp: crear la app gratuita en Meta for Developers con el producto WhatsApp, habilitar el número propio como destinatario y cargar en `.env` el token temporal, el id del número de prueba y `WHATSAPP_TEST_RECIPIENT`. Después, escribirle al número de prueba y ejecutar `npm run whatsapp:probar -- 74`.
+   - Claude queda simulado, porque requiere créditos pagos.
    - **Funcionalidades no verificadas por completo (no se dan por terminadas):**
      - NeuroGym Intelligence: la estimación de riesgo es un puntaje por reglas (caída de frecuencia, ausencia, cuota impaga), no un modelo entrenado; revisar contra el TFI. La retención mensual en porcentaje no se calcula. ETL, señales, Excel y propuestas tienen pruebas automáticas; en el navegador no se guardó ninguna decisión.
      - Consultas profesionales: solicitud, confirmación, rechazo, reprogramación, cancelación, comisión y .ics probados en el backend; no ejercitados en el navegador (el profesional del seed no tiene consultas). El profesional recibe avisos solo en la plataforma.
