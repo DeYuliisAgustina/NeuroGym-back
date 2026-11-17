@@ -2,14 +2,14 @@
 
 Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada avance significativo.
 
-## Estado actual (2026-11-16)
+## Estado actual (2026-11-17)
 
 ### Repositorios
 
 | Repositorio | URL (privado) | Commits |
 |---|---|---|
-| NeuroGym-back | https://github.com/DeYuliisAgustina/NeuroGym-back | 17 (más este registro) |
-| NeuroGym-front | https://github.com/DeYuliisAgustina/NeuroGym-front | 9 |
+| NeuroGym-back | https://github.com/DeYuliisAgustina/NeuroGym-back | 20 (más este registro) |
+| NeuroGym-front | https://github.com/DeYuliisAgustina/NeuroGym-front | 17 |
 
 ### Base de datos
 
@@ -28,14 +28,18 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 | Entrenamiento (CU-003: rutina simulada, reemplazo, edición, variante, entrenamiento) y equipamiento (RD22) | `entrenamiento-retencion.test.ts` |
 | Retención (CU-002: ETL, señales, estimaciones solo Intelligence, propuesta con aprobación y bonificación Premium, xlsx, canjes) | `entrenamiento-retencion.test.ts` (10 en total) + `reglas.test.ts` |
 | Marketplace (Observer CREADO/REPROGRAMADO/CANCELADO, RD16, comisión 8 %, Fundadores, .ics) | `marketplace.test.ts` (8) + `observer.test.ts` (5) |
-| Frontend | `npm test` (14) y prueba manual en el navegador: sitio público, ingreso del socio, bienvenida y rutina, pago con el simulador hasta el comprobante, ingreso administrativo, Intelligence, retención, recepción, cobros, equipamiento, usuarios y horarios sin errores de consola |
+| Frontend (diseño de los prototipos) | `npm test` (18) y revisión en el navegador, en escritorio y en celular (375 px), de las tres áreas con datos del seed: sitio público, ingreso, registro y acceso interno; socio (resumen, rutina, turnos, QR, cuotas y pagos con comprobante, beneficios, profesionales, equipamiento, perfil); personal (los 14 módulos y los modales de efectivo, permisos y ficha del socio); profesional (agenda, solicitudes, servicio y horarios, perfil, plan Marketplace) |
 
-### Pruebas ejecutadas (2026-11-16)
+### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **108 pruebas aprobadas** (54 unitarias + 54 de integración con PostgreSQL). Cobertura de líneas 71 %; patrones entre 89 % y 100 %.
-- Frontend `npm test`: **14 pruebas aprobadas**. `vite build` correcto (249 kB de JavaScript inicial).
+- Backend `npm test`: **114 pruebas aprobadas** (unitarias y de integración con PostgreSQL).
+- Frontend `npm test`: **18 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
+
+- La hoja de estilos copiada del prototipo incluía la regla `body{max-width:680px}` de su comprobante descargable y angostaba todas las páginas: se quitó.
+- `tsx watch` no detectó cambios del backend en Windows y sirvió código anterior (precios en $0): se forzó la recarga. Si vuelve a pasar, reiniciar `npm run dev`.
+- La prueba CU-004-010 crea un turno que empezó 30 minutos antes; ejecutada entre las 00:00 y las 00:30 el inicio cae en el día anterior y falla. No afecta la aplicación.
 
 - Las cuotas vencidas no pasaban a IMPAGA si el servidor no estaba encendido a la hora de la tarea diaria: se agregó `ponerAlDia()` al iniciar (con `CRON_ENABLED=true`) y en el seed.
 - pgAdmin ejecuta el editor en una transacción y `CREATE DATABASE` no se admite: el script de rol quedó solo con `CREATE ROLE`; las bases las crea el rol `neurogym`.
@@ -46,6 +50,14 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 2. Almacenamiento de objetos en un proveedor S3 compatible (hoy, carpeta local).
 3. Actualizar el monto de las preaprobaciones de débito cuando cambia un precio.
 4. Apartado 10.5.10 del TFI (casos de prueba) a partir de las funciones reales: `verificarReservaVigente`, `CuotaService.registrarResultado`, `detectarSenal`/`estimarRiesgo`, `validarRutinaGenerada`.
+
+### Interfaz: prototipos y figuras 32 a 67
+
+- El frontend reproduce `NeuroGym_Prototipo_Interactivo.html` y `NeuroGym_Admin.html`: su CSS se usa sin cambios (`src/assets/styles/neurogym.css`) y `complementos.css` agrega solo lo que aparece en las figuras y no en los prototipos (ficha del socio, Fig. 63 c).
+- Rutas con los nombres del prototipo: `/socio/pagos`, `/socio/marketplace`, `/socio/incidencias`, `/admin/recepcion`, `/admin/pagos`, `/admin/analitica`, `/admin/accesos`, `/admin/suscripcion`, `/profesional/solicitudes`, etc. Mercado Pago vuelve a `/socio/pagos` (`/socio/cuotas` redirige).
+- Contrato ampliado solo con datos de lectura: perfil del socio (gimnasio, ventana de ingreso, precios vigentes de ambos planes) y listado de socios (estado de cuota, asistencias del mes, última visita).
+- Elementos del prototipo que no tienen respaldo en el backend y se reemplazaron por su equivalente real: selector de perfil y herramientas de demostración (omitidos), recuperación de contraseña (indica cómo pedirla), cambio de suscripción SaaS (pedido a ventas), mensualidades y registro de acciones (no se muestran), cancelación de reservas por el personal (la hace el socio), prioridad informada por el socio (la define el gimnasio).
+- Intelligence muestra asistencias y estimaciones del backend; los indicadores usan el último mes completo. La retención mensual en porcentaje del prototipo requiere un cálculo que el backend no tiene.
 
 ### Decisiones y diferencias con el TFI (para revisar con la autora)
 
