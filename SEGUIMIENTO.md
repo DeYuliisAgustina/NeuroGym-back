@@ -373,6 +373,16 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - Cada documento cuenta para el límite de 25 mensajes de la clave del sandbox.
 - **Descarga unificada (pedido de la autora, 2026-11-17):** el botón «Descargar comprobante» ahora baja **el mismo PDF** que se envía por WhatsApp. Las rutas son `GET /api/socio/pagos/{id}/comprobante.pdf` (socio titular) y `GET /api/admin/pagos/{id}/comprobante.pdf` (personal con permiso COBROS, consulta), con el mismo control de acceso que el comprobante. Reemplaza al archivo HTML anterior. Verificado contra el backend en ejecución: socio4 descarga `comprobante-NG-00000077.pdf`; otro socio recibe 404 y sin sesión, 401. Pruebas automáticas: backend 166 y frontend 24. **Confirmado por la autora en el navegador:** como `socio4` descargó `comprobante-NG-00000078.pdf` desde «Cuotas y pagos».
 
+### IA de rutinas real con Gemini (2026-11-20)
+
+- La autora pidió que la IA de rutinas no esté simulada. Se agregó `ServicioIAGemini` (API de Gemini de Google AI Studio, por REST, sin dependencias nuevas). Implementa el mismo puerto `ServicioIA` que Claude y la simulación: mismos pedidos, salida JSON restringida al esquema Zod y la misma validación (solo ejercicios disponibles del catálogo).
+- **Costo cero:** clave del nivel gratuito de AI Studio (proyecto «Default Gemini Project», sin facturación configurada). La suscripción Gemini Pro de la autora no da acceso a la API; la clave de AI Studio sí y es gratuita.
+- **Selección del proveedor** (`env.ia.proveedor`): `IA_PROVEEDOR` = gemini | claude | simulado; vacío → el que tenga clave (primero Gemini). En los tests, siempre simulado.
+- **Modelos:** `GEMINI_MODELO=gemini-3.5-flash` y respaldo `GEMINI_MODELOS_RESPALDO=gemini-flash-lite-latest`. El 20/11 `gemini-flash-latest` y `gemini-3.8-flash` respondían 503 (saturados); ante 429/5xx o falta de respuesta se prueba el modelo de respaldo.
+- La clave se carga con `scripts/cargar-clave-gemini.ps1`: la toma del portapapeles, la guarda en `.env` sin mostrarla y vacía el portapapeles. Va en el encabezado `x-goog-api-key`, nunca en la URL.
+- Verificado: llamada real con 14 ejercicios de prueba → rutina de 3 días con 13 ejercicios en ~19 s y variante coherente (Sentadilla → Prensa). El backend en ejecución informa `generador: Gemini (gemini-3.5-flash)`. Pruebas: 4 unitarias nuevas (`tests/unit/ia-gemini.test.ts`); suite completa 185.
+- VS Code: la tarea «Levantar NeuroGym» se ejecuta sola al abrir la carpeta (`runOptions.runOn: folderOpen`), porque una actualización de VS Code había cerrado el backend y el frontend. VS Code puede pedir una vez permiso para las tareas automáticas.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
