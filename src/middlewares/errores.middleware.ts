@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import { MulterError } from 'multer';
 import { ZodError } from 'zod';
 import { ErrorApp } from '../utils/errores';
 
@@ -38,6 +39,31 @@ export function manejarErrores(error: unknown, _req: Request, res: Response, _ne
   }
   const integridad = violacionIntegridad(error);
   if (integridad) return res.status(422).json({ error: 'REGLA_INTEGRIDAD', mensaje: integridad });
+
+  // Límites de la subida de fotos y videos de incidencias (multer): error del cliente, no del servidor.
+  if (error instanceof MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'ARCHIVO_DEMASIADO_GRANDE', mensaje: 'El archivo supera el tamaño permitido' });
+    }
+    return res.status(400).json({ error: 'ARCHIVOS_INVALIDOS', mensaje: 'Se pueden adjuntar hasta 5 fotos o videos en el campo «archivos»' });
+  }
+
+  // Errores 4xx de los middlewares de Express: JSON mal formado o cuerpo demasiado
+  // grande (http-errors marca expose = true) y archivo estático inexistente en
+  // /archivos (express.static informa 404 con el código ENOENT).
+  const http = error as { status?: number; statusCode?: number; type?: string; expose?: boolean; code?: string };
+  const estado = http?.status ?? http?.statusCode;
+  const archivoInexistente = estado === 404 && (http?.code === 'ENOENT' || http?.code === 'ENOTDIR');
+  if ((http?.expose === true || archivoInexistente) && typeof estado === 'number' && estado >= 400 && estado < 500) {
+    if (http.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'JSON_INVALIDO', mensaje: 'El cuerpo de la solicitud no es un JSON válido' });
+    }
+    if (http.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'CUERPO_DEMASIADO_GRANDE', mensaje: 'La solicitud supera el tamaño permitido' });
+    }
+    if (estado === 404) return res.status(404).json({ error: 'RUTA_INEXISTENTE', mensaje: 'Recurso no encontrado' });
+    return res.status(estado).json({ error: 'SOLICITUD_INVALIDA', mensaje: 'La solicitud no es válida' });
+  }
 
   if (process.env.NODE_ENV !== 'test') console.error(error);
   return res.status(500).json({ error: 'ERROR_INTERNO', mensaje: 'Ocurrió un error inesperado' });

@@ -32,10 +32,23 @@ Registro de avance para retomar el trabajo entre sesiones. Se actualiza en cada 
 
 ### Pruebas ejecutadas (2026-11-17)
 
-- Backend `npm test`: **166 pruebas aprobadas** (unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación) y las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado).
+- Backend `npm test`: **172 pruebas aprobadas** (2026-11-20; unitarias y de integración con PostgreSQL), incluidas las de Mercado Pago (Orders, débito, imputación al período y conciliación), las de WhatsApp (proveedores, webhooks de estado, idempotencia, fallos, modo de prueba y comprobante en PDF con enlace firmado) y las de errores HTTP de los middlewares (`tests/integration/errores-http.test.ts`).
 - Frontend `npm test`: **24 pruebas aprobadas**; `tsc` sin errores y `vite build` correcto (265 kB de JavaScript inicial; la lectura de QR se carga solo en Recepción).
 
 ### Errores detectados y corregidos
+
+- **Acceso al servidor local y revisión de rutas (2026-11-20).**
+  - **"RUTA_INEXISTENTE" en `http://localhost:3000/` no era una falla del servidor.** `npm run dev` arranca bien en el puerto 3000 (`PORT`, por defecto 3000), con PostgreSQL conectado (`/api/salud` → 200). La API no tiene página en la raíz: todas las rutas están bajo el prefijo **`/api`** (`src/app.ts`: `app.use('/api', apiRoutes)`), y cualquier otra dirección responde 404 `RUTA_INEXISTENTE` por diseño. La URL correcta de los planes del marketplace es **`GET http://localhost:3000/api/publico/planes-marketplace`** (`src/routes/modulos.routes.ts`, `marketplaceController.planes`, pública), y responde 200 con los planes BASICO y PROFESIONAL. El frontend ya la usa bien (`VITE_API_URL=http://localhost:3000/api`). Las pantallas se abren desde `http://localhost:5173`.
+  - **Inventario y prueba de todas las rutas.** Hay 145 rutas registradas: 13 públicas y 132 autenticadas. No hay duplicadas, y las 186 llamadas del frontend tienen su ruta en el backend. Contra el servidor en ejecución y sin modificar datos, cada ruta protegida respondió 401 sin token y 403 con un perfil ajeno. Con el perfil correcto, los GET respondieron 200 con datos reales (incluidos los PDF de comprobantes, el Excel de Intelligence y el .ics). Las escrituras con datos inválidos o un id inexistente respondieron 400 o 404. Las rutas públicas devolvieron el código esperado: webhooks sin firma → 401/403, enlace de comprobante sin firma → 401 y retorno de adhesión → 302. CORS permite `http://localhost:5173`. Cuatro rutas que ejecutarían una acción real se probaron solo sin token: `DELETE /api/socio/debito`, `POST /api/socio/qr`, `POST /api/admin/retencion/etl` y `PATCH /api/notificaciones/leidas`.
+  - **Errores corregidos (`src/middlewares/errores.middleware.ts`).** Cuatro errores del cliente respondían **500 "Ocurrió un error inesperado"** porque el manejador centralizado no reconocía los errores de los middlewares de Express:
+    1. JSON mal formado → ahora 400 `JSON_INVALIDO`.
+    2. Cuerpo mayor a 1 MB → ahora 413 `CUERPO_DEMASIADO_GRANDE`.
+    3. Archivo inexistente en `/archivos/...` → ahora 404 `RUTA_INEXISTENTE`.
+    4. Más de 5 archivos, o un archivo demasiado grande, en `POST /api/socio/incidencias` (multer) → ahora 400 `ARCHIVOS_INVALIDOS` o 413 `ARCHIVO_DEMASIADO_GRANDE`, sin registrar la incidencia.
+
+    Solo se tratan como 4xx los errores marcados como del cliente por Express o multer: los demás siguen respondiendo 500, y no cambia ninguna regla de negocio ni ruta. Pruebas: `tests/integration/errores-http.test.ts` (6 pruebas).
+  - **Sin cambios:** `GET /api/cuotas/:id/medios` responde 422 `CUOTA_PAGADA` para una cuota ya pagada, que es lo que dice la regla (con una cuota pendiente responde 200 con los tres medios). `GET /api/socio/rutina/ejercicios/:id/variante` no se probó contra la base de desarrollo porque la rutina del socio de prueba no tiene equipos fuera de servicio; la cubren las pruebas automáticas.
+  - **Observación:** el repositorio local se reinició con `git reset` a `origin/main` y eso quitó de `main` el commit local `2f59f86` (test de caja blanca del punto 10.5.10 y su nota en este archivo), que no se había subido. El commit sigue en git y se puede recuperar con `git cherry-pick 2f59f86`.
 
 - La hoja de estilos copiada del prototipo incluía la regla `body{max-width:680px}` de su comprobante descargable y angostaba todas las páginas: se quitó.
 - `tsx watch` no detectó cambios del backend en Windows y sirvió código anterior (precios en $0): se forzó la recarga. Si vuelve a pasar, reiniciar `npm run dev`.
