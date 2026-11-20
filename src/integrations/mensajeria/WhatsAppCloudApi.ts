@@ -58,7 +58,9 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
   /** Destino real del mensaje: en prueba, siempre el número habilitado. */
   destinoDe(telefono: string): string | null {
     if (this.opciones.produccion) return normalizarTelefono(telefono);
-    const prueba = this.opciones.destinoPrueba.replace(/\D/g, '');
+    // La lista de destinatarios del número de prueba guarda los celulares argentinos
+    // sin el 9 (54 + característica + número): con «549…» Meta responde 131030.
+    const prueba = this.opciones.destinoPrueba.replace(/\D/g, '').replace(/^549/, '54');
     return prueba || null;
   }
 

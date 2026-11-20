@@ -10,11 +10,11 @@ describe('WhatsApp Cloud API: plantillas aprobadas (mensajes iniciados por Neuro
   it('envía la plantilla de vencimiento con sus variables en orden y el idioma es_AR', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respuesta(true, { messages: [{ id: 'wamid.PLANTILLA' }] }));
     const r = await new WhatsAppCloudApi(base).enviarPlantilla('', plantilla('vencimientoProximo', 'Ana', 'Noviembre 2026', '$ 32.000', '10/11/2026'));
-    expect(r).toEqual({ aceptado: true, idMensaje: 'wamid.PLANTILLA', destino: '5491100000000' });
+    expect(r).toEqual({ aceptado: true, idMensaje: 'wamid.PLANTILLA', destino: '541100000000' });
     expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to: '5491100000000',
+      to: '541100000000',
       type: 'template',
       template: {
         name: 'neurogym_vencimiento_cuota',

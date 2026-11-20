@@ -13,14 +13,14 @@ describe('WhatsApp Cloud API: modo de prueba con el número gratuito de Meta', (
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('en prueba redirige el mensaje al número habilitado, con Graph API v23.0', async () => {
+  it('en prueba redirige el mensaje al número habilitado (celular argentino sin el 9), con Graph API v23.0', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respuesta(true, { messages: [{ id: 'wamid.PRUEBA' }] }));
     const r = await new WhatsAppCloudApi({ ...base, destinoPrueba: '+54 9 11 0000-0000' }).enviar('11 5555-0001', 'Comprobante NG-1');
-    expect(r).toEqual({ aceptado: true, idMensaje: 'wamid.PRUEBA', destino: '5491100000000' });
+    expect(r).toEqual({ aceptado: true, idMensaje: 'wamid.PRUEBA', destino: '541100000000' });
     const [url, init] = fetch.mock.calls[0];
     expect(url).toBe('https://graph.facebook.com/v23.0/1234567890/messages');
     const cuerpo = JSON.parse(String(init?.body));
-    expect(cuerpo).toMatchObject({ messaging_product: 'whatsapp', to: '5491100000000', type: 'text', text: { body: 'Comprobante NG-1' } });
+    expect(cuerpo).toMatchObject({ messaging_product: 'whatsapp', to: '541100000000', type: 'text', text: { body: 'Comprobante NG-1' } });
   });
 
   it('en producción usa el teléfono del socio normalizado', () => {
