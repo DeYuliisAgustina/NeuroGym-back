@@ -10,7 +10,8 @@ async function iniciar() {
     console.log(`NeuroGym API escuchando en http://localhost:${env.puerto}`);
     console.log(
       `Integraciones → Mercado Pago: ${env.mercadoPago.configurado ? 'API oficial (entorno de PRUEBA)' : 'NO CONFIGURADO'} · ` +
-        `WhatsApp: ${env.mensajeria.simulado ? 'SIMULADA' : 'real'} · IA: ${env.ia.simulado ? 'SIMULADA' : env.ia.modelo}`,
+        `WhatsApp: ${{ DIALOG360_SANDBOX: 'real (sandbox de 360dialog)', META_CLOUD_API: 'real (WhatsApp Cloud API de Meta)', SIMULADO: 'SIMULADA' }[env.mensajeria.proveedor]} · ` +
+        `IA de rutinas: ${env.ia.simulado ? 'simulada (sin ANTHROPIC_API_KEY)' : env.ia.modelo}`,
     );
   });
   if (env.cronHabilitado) programarTareas();
