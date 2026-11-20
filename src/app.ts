@@ -29,6 +29,18 @@ export function crearApp() {
   app.use('/archivos', express.static(env.almacenamiento.directorioLocal, { fallthrough: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ estado: 'ok', servicio: 'neurogym-back' }));
+  // Inicio de la API: indica que el servidor funciona y dónde están las rutas
+  // (al abrir http://localhost:3000/ en el navegador ya no aparece un 404).
+  app.get(['/', '/api'], (_req, res) =>
+    res.json({
+      servicio: 'NeuroGym API',
+      estado: 'ok',
+      mensaje: 'El backend está funcionando. Las rutas de la API están bajo /api; la aplicación se usa desde el frontend.',
+      frontend: env.frontendUrl.split(',')[0],
+      salud: '/api/salud',
+      ejemplo: '/api/publico/planes-marketplace',
+    }),
+  );
   app.use('/api', apiRoutes);
   app.use((_req, res) => res.status(404).json({ error: 'RUTA_INEXISTENTE', mensaje: 'Recurso no encontrado' }));
   app.use(manejarErrores);

@@ -18,12 +18,18 @@ describe('Errores HTTP de los middlewares', () => {
   });
   afterAll(() => prisma.$disconnect());
 
-  it('la raíz y las rutas sin el prefijo /api responden 404 RUTA_INEXISTENTE', async () => {
-    for (const ruta of ['/', '/publico/planes-marketplace', '/api']) {
+  it('la raíz y /api informan que la API funciona y dónde están las rutas', async () => {
+    for (const ruta of ['/', '/api']) {
       const r = await request(app).get(ruta);
-      expect(r.status).toBe(404);
-      expect(r.body.error).toBe('RUTA_INEXISTENTE');
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ servicio: 'NeuroGym API', estado: 'ok', salud: '/api/salud' });
     }
+  });
+
+  it('las rutas sin el prefijo /api responden 404 RUTA_INEXISTENTE', async () => {
+    const r = await request(app).get('/publico/planes-marketplace');
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('RUTA_INEXISTENTE');
   });
 
   it('la ruta pública de planes del marketplace está bajo /api/publico', async () => {
