@@ -11,7 +11,7 @@ async function iniciar() {
     console.log(
       `Integraciones → Mercado Pago: ${env.mercadoPago.configurado ? 'API oficial (entorno de PRUEBA)' : 'NO CONFIGURADO'} · ` +
         `WhatsApp: ${{ DIALOG360_SANDBOX: 'real (sandbox de 360dialog)', META_CLOUD_API: 'real (WhatsApp Cloud API de Meta)', SIMULADO: 'SIMULADA' }[env.mensajeria.proveedor]} · ` +
-        `IA de rutinas: ${env.ia.simulado ? 'simulada (sin ANTHROPIC_API_KEY)' : env.ia.modelo}`,
+        `IA de rutinas: ${{ GEMINI: `real (Gemini, ${env.ia.geminiModelo})`, CLAUDE: `real (Claude, ${env.ia.modelo})`, SIMULADO: 'SIMULADA (sin GEMINI_API_KEY ni ANTHROPIC_API_KEY)' }[env.ia.proveedor]}`,
     );
   });
   if (env.cronHabilitado) programarTareas();
