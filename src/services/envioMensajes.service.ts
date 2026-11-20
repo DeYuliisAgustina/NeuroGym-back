@@ -1,7 +1,7 @@
 import { Prisma, type EnvioMensaje, type EstadoEnvioMensaje, type TipoEnvioMensaje, type TipoNotificacion } from '@prisma/client';
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
-import { servicioMensajeria, type EstadoInformado, type ServicioMensajeria } from '../integrations/mensajeria';
+import { servicioMensajeria, type EstadoInformado, type PlantillaWhatsApp, type ServicioMensajeria } from '../integrations/mensajeria';
 import { enlaceComprobante } from './enlaceComprobante';
 
 export interface SolicitudEnvio {
@@ -18,6 +18,11 @@ export interface SolicitudEnvio {
   eventoTurnoId?: number;
   /** Archivo adjunto (PDF del comprobante); el texto va como caption y no lo reemplaza. */
   documento?: { nombreArchivo: string };
+  /**
+   * Plantilla aprobada equivalente al texto. Con WhatsApp Cloud API de Meta se envía
+   * la plantilla (obligatoria fuera de la ventana de 24 h); el texto queda como registro.
+   */
+  plantilla?: PlantillaWhatsApp;
 }
 
 /** Orden de avance de los estados que informa el proveedor (un estado no retrocede). */
@@ -87,6 +92,8 @@ export function crearServicioEnvios(mensajeria: ServicioMensajeria) {
       const omision = await motivoOmision(s.usuarioId);
       if (omision) return prisma.envioMensaje.update({ where: { id: envio.id }, data: { estado: 'OMITIDO', detalle: omision } });
 
+      // Con Meta, los avisos viajan como plantilla aprobada (con el PDF en el encabezado si lo hay).
+      const conPlantilla = s.plantilla && mensajeria.enviarPlantilla && env.mensajeria.usarPlantillas ? s.plantilla : null;
       let r;
       if (s.documento) {
         // El PDF viaja por un enlace HTTPS firmado y de corta duración; sin URL pública
@@ -103,9 +110,11 @@ export function crearServicioEnvios(mensajeria: ServicioMensajeria) {
           });
         }
         const url = enlaceComprobante(base || 'https://simulado.invalid', envio.id);
-        r = await mensajeria.enviarDocumento(s.telefono, { url, nombreArchivo: s.documento.nombreArchivo, texto: s.texto });
+        r = conPlantilla
+          ? await mensajeria.enviarPlantilla!(s.telefono, conPlantilla, { url, nombreArchivo: s.documento.nombreArchivo })
+          : await mensajeria.enviarDocumento(s.telefono, { url, nombreArchivo: s.documento.nombreArchivo, texto: s.texto });
       } else {
-        r = await mensajeria.enviar(s.telefono, s.texto);
+        r = conPlantilla ? await mensajeria.enviarPlantilla!(s.telefono, conPlantilla) : await mensajeria.enviar(s.telefono, s.texto);
       }
       if (!r.aceptado) {
         return prisma.envioMensaje.update({

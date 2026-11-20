@@ -6,6 +6,7 @@ import { WhatsAppCloudApi } from './WhatsAppCloudApi';
 
 export type * from './ServicioMensajeria';
 export * from './estadosWhatsapp';
+export * from './plantillas';
 export { Dialog360Sandbox, MensajeriaSimulada, WhatsAppCloudApi };
 
 /** Proveedor elegido por configuración (WHATSAPP_PROVEEDOR o credenciales cargadas). */

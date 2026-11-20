@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { prisma } from '../../src/config/prisma';
+import { recordarTurnosProfesionales } from '../../src/services/turnoProfesional.service';
 import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, sumarDias } from '../../src/utils/fechas';
 import { app, catalogo, conToken, crearGimnasio, crearSocio, limpiarBase } from './fixtures';
 
@@ -77,6 +78,24 @@ describe('Marketplace de profesionales y patrón Observer (RD13, RD16, RD17)', (
     const turnos = await prisma.turnoProfesional.findFirst({ where: { estado: 'SOLICITADO' } });
     const id = turnos?.id ?? (await solicitar(socio.token, '11:00')).body.id;
     expect((await request(app).patch(`/api/turnos-profesionales/${id}/cancelacion`).set(conToken(intruso.token)).send({ motivo: 'x' })).status).toBe(404);
+  });
+
+  it('recordatorio diario: avisa una sola vez de la consulta vigente de mañana (no de las canceladas)', async () => {
+    const socio = await crearSocio(g.sedeA.id, 'PREMIUM');
+    const crear = (estado: 'CONFIRMADO' | 'CANCELADO', hora: string) =>
+      prisma.turnoProfesional.create({
+        data: { socioId: socio.id, profesionalId: profesional.id, metodoPagoId, fecha: aFechaDb(manana), horaInicio: aHoraDb(hora), horaFin: aHoraDb(`${Number(hora.slice(0, 2)) + 1}:00`), modalidad: 'PRESENCIAL', estado, motivo: estado === 'CANCELADO' ? 'Imprevisto' : null },
+      });
+    const vigente = await crear('CONFIRMADO', '15:00');
+    const cancelado = await crear('CANCELADO', '16:00');
+    await recordarTurnosProfesionales();
+    await recordarTurnosProfesionales();
+    const envios = await prisma.envioMensaje.findMany({ where: { usuarioId: socio.usuarioId, referencia: { startsWith: 'turno-recordatorio:' } } });
+    expect(envios.map((e) => e.referencia)).toEqual([`turno-recordatorio:${vigente.id}:${manana}`]);
+    expect(envios[0].texto).toContain('consulta de nutrición con Nutri Prueba (presencial)');
+    expect(envios.some((e) => e.referencia.includes(`:${cancelado.id}:`))).toBe(false);
+    const avisos = await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId, canal: 'PLATAFORMA', mensaje: { startsWith: 'Recordatorio: mañana' } } });
+    expect(avisos).toBe(1);
   });
 
   it('RD13: consulta realizada y pagada después de su horario → una sola comisión del 8 %', async () => {

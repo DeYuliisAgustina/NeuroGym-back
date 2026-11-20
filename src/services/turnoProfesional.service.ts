@@ -3,7 +3,8 @@ import { prisma, type Tx } from '../config/prisma';
 import { gestorEventosTurno, type TurnoObservado } from '../patterns/observer';
 import { aNumero, redondear } from '../utils/dinero';
 import { noEncontrado, prohibido, reglaNegocio } from '../utils/errores';
-import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, fechaIso, horaTexto, minutosDeHora } from '../utils/fechas';
+import { plantilla } from '../integrations/mensajeria';
+import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, fechaIso, horaTexto, minutosDeHora, sumarDias } from '../utils/fechas';
 import { GeneradorEventoCalendario } from '../utils/GeneradorEventoCalendario';
 import { notificacionService } from './notificacion.service';
 import { esPremium } from './precios.service';
@@ -119,6 +120,44 @@ async function turnoDeActor(turnoId: number, actor: Actor) {
 }
 
 /** Solicitudes, confirmaciones, cancelaciones y reprogramaciones de consultas (RF13, RF30, RF37–RF43). */
+const ESPECIALIDAD_TEXTO: Record<string, string> = { NUTRICION: 'nutrición', DEPORTOLOGIA: 'deportología' };
+
+/**
+ * Tarea diaria: recordatorio por WhatsApp (y en la plataforma) de las consultas
+ * con nutricionista o deportólogo del día siguiente que siguen vigentes
+ * (CONFIRMADO o REPROGRAMADO). Idempotente: referencia «turno-recordatorio:{id}:{fecha}»,
+ * así una reprogramación a otra fecha genera su propio recordatorio.
+ */
+export async function recordarTurnosProfesionales(hoy = ahoraLocal().fecha) {
+  const manana = sumarDias(hoy, 1);
+  const turnos = await prisma.turnoProfesional.findMany({
+    where: { fecha: aFechaDb(manana), estado: { in: ['CONFIRMADO', 'REPROGRAMADO'] } },
+    include: incluirTurno,
+  });
+  let enviados = 0;
+  for (const t of turnos) {
+    const d = describir(t);
+    const [anio, mes, dia] = d.fecha.split('-');
+    const especialidad = ESPECIALIDAD_TEXTO[d.especialidad] ?? d.especialidad.toLowerCase();
+    const modalidad = d.modalidad === 'ONLINE' ? 'en línea' : 'presencial';
+    const mensaje = `Recordatorio: mañana ${dia}/${mes}/${anio} a las ${d.horaInicio} tenés tu consulta de ${especialidad} con ${d.profesional} (${modalidad}).`;
+    const referencia = `turno-recordatorio:${t.id}:${d.fecha}`;
+    // La notificación interna se registra una sola vez, junto con el primer intento de envío.
+    if (await prisma.envioMensaje.findUnique({ where: { referencia } })) continue;
+    await notificacionService.notificar({ usuarioId: t.socio.usuarioId, tipo: 'TURNO_PROFESIONAL', mensaje });
+    const envio = await notificacionService.enviarMensaje({
+      usuarioId: t.socio.usuarioId,
+      telefono: t.socio.telefono,
+      tipo: 'TURNO_PROFESIONAL',
+      mensaje: `NeuroGym · ${mensaje}`,
+      referencia,
+      plantilla: plantilla('recordatorioTurno', t.socio.usuario.nombre, especialidad, d.profesional, `${dia}/${mes}/${anio}`, d.horaInicio, modalidad),
+    });
+    if (envio.estado !== 'FALLIDO') enviados++;
+  }
+  return { turnos: turnos.length, enviados };
+}
+
 export const turnoProfesionalService = {
   horariosLibres,
 

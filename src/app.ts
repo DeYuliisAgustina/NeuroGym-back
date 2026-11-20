@@ -42,6 +42,14 @@ export function crearApp() {
     }),
   );
   app.use('/api', apiRoutes);
+  // Una dirección de la API escrita sin el prefijo (por ejemplo /publico/planes-marketplace)
+  // redirige a la misma ruta bajo /api; si ahí no existe, responde el 404 de siempre.
+  app.use((req, res, next) => {
+    if ((req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api/') && !req.path.startsWith('/archivos/')) {
+      return res.redirect(308, `/api${req.originalUrl}`);
+    }
+    next();
+  });
   app.use((_req, res) => res.status(404).json({ error: 'RUTA_INEXISTENTE', mensaje: 'Recurso no encontrado' }));
   app.use(manejarErrores);
   return app;

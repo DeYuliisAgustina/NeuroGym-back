@@ -26,8 +26,17 @@ describe('Errores HTTP de los middlewares', () => {
     }
   });
 
-  it('las rutas sin el prefijo /api responden 404 RUTA_INEXISTENTE', async () => {
-    const r = await request(app).get('/publico/planes-marketplace');
+  it('un GET sin el prefijo /api redirige a la misma ruta bajo /api', async () => {
+    const r = await request(app).get('/publico/planes-marketplace?x=1');
+    expect(r.status).toBe(308);
+    expect(r.headers.location).toBe('/api/publico/planes-marketplace?x=1');
+    const inexistente = await request(app).get('/no-existe').redirects(1);
+    expect(inexistente.status).toBe(404);
+    expect(inexistente.body.error).toBe('RUTA_INEXISTENTE');
+  });
+
+  it('un POST sin el prefijo /api responde 404 RUTA_INEXISTENTE (no se redirige)', async () => {
+    const r = await request(app).post('/auth/login').send({});
     expect(r.status).toBe(404);
     expect(r.body.error).toBe('RUTA_INEXISTENTE');
   });

@@ -1,5 +1,6 @@
 import type { TipoNotificacion } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
+import type { PlantillaWhatsApp } from '../integrations/mensajeria';
 import { servicioEnvios } from './envioMensajes.service';
 import { noEncontrado } from '../utils/errores';
 
@@ -22,6 +23,8 @@ export const notificacionService = {
     referencia: string;
     cuotaId?: number;
     eventoTurnoId?: number;
+    /** Plantilla aprobada equivalente (WhatsApp Cloud API de Meta). */
+    plantilla?: PlantillaWhatsApp;
   }) {
     // El estado real (aceptado, enviado, entregado, leído o fallido) queda en envio_mensaje.
     return servicioEnvios.enviar({
@@ -33,6 +36,7 @@ export const notificacionService = {
       cuotaId: datos.cuotaId,
       tipoNotificacion: datos.tipo,
       eventoTurnoId: datos.eventoTurnoId,
+      plantilla: datos.plantilla,
     });
   },
 
