@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import request from 'supertest';
 import { env } from '../../src/config/env';
 import { prisma } from '../../src/config/prisma';
-import type { DocumentoAdjunto, PlantillaWhatsApp, ResultadoEnvio, ServicioMensajeria } from '../../src/integrations/mensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from '../../src/integrations/mensajeria';
 import { CuotaService } from '../../src/patterns/facade/CuotaService';
 import { crearServicioEnvios } from '../../src/services/envioMensajes.service';
 import { marcarCuotasVencidas } from '../../src/services/cuotaGeneracion.service';
@@ -27,15 +27,6 @@ class ProveedorQueAcepta implements ServicioMensajeria {
   async enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
     this.documentos.push(documento);
     return this.enviar(telefono, documento.texto);
-  }
-}
-
-/** Doble de WhatsApp Cloud API (Meta): registra las plantillas en lugar de textos libres. */
-class ProveedorConPlantillas extends ProveedorQueAcepta {
-  readonly plantillas: { plantilla: PlantillaWhatsApp; documento?: { url: string; nombreArchivo: string } }[] = [];
-  async enviarPlantilla(_telefono: string, plantilla: PlantillaWhatsApp, documento?: { url: string; nombreArchivo: string }): Promise<ResultadoEnvio> {
-    this.plantillas.push({ plantilla, documento });
-    return { aceptado: true, idMensaje: `wamid.PLANTILLA.${crypto.randomUUID()}`, destino: '5490000000000' };
   }
 }
 
@@ -182,23 +173,6 @@ describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
     });
     expect(proveedor.solicitudes.length).toBe(antes);
     expect((await prisma.pago.findUniqueOrThrow({ where: { id: pago.id } })).estado).toBe('APROBADO');
-  });
-
-  it('con Meta, el comprobante viaja como plantilla aprobada con el PDF en el encabezado', async () => {
-    const meta = new ProveedorConPlantillas();
-    const cuotasMeta = new CuotaService(new MercadoPagoDobleDePrueba(), meta);
-    const socio = await socioHabilitado();
-    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const pago = await prisma.pago.create({ data: { cuotaId: cuota.id, medio: 'PAGO_UNICO', importe: 30000, estado: 'PENDIENTE' } });
-    await cuotasMeta.registrarResultado({ tipo: 'PAGO', pagoId: pago.id, referenciaExterna: 'MP-WA-PLANTILLA', aprobado: true });
-    const comprobante = await prisma.comprobante.findUniqueOrThrow({ where: { pagoId: pago.id } });
-    expect(meta.solicitudes).toHaveLength(0);
-    const [enviada] = meta.plantillas;
-    expect(enviada.plantilla.nombre).toBe('neurogym_comprobante_pago');
-    expect(enviada.plantilla.parametros).toEqual(['Socio', expect.stringContaining('30.000'), expect.any(String), comprobante.numero]);
-    expect(enviada.documento?.nombreArchivo).toBe(`comprobante-${comprobante.numero}.pdf`);
-    const envio = await prisma.envioMensaje.findUniqueOrThrow({ where: { referencia: `comprobante:${comprobante.id}` } });
-    expect(envio.estado).toBe('ACEPTADO');
   });
 
   it('escenario 3: un pago rechazado no genera comprobante ni envío', async () => {

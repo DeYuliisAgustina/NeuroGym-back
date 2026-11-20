@@ -26,21 +26,9 @@ export interface DocumentoAdjunto {
   texto: string;
 }
 
-/**
- * Plantilla aprobada de WhatsApp (mensaje iniciado por la empresa). Fuera de la
- * ventana de 24 h abierta por el destinatario, Meta solo entrega plantillas.
- * Los parámetros completan {{1}}, {{2}}, … del cuerpo, en orden.
- */
-export interface PlantillaWhatsApp {
-  nombre: string;
-  parametros: string[];
-}
-
 export interface ServicioMensajeria {
   readonly proveedor: ProveedorMensajeria;
   readonly simulado: boolean;
   enviar(telefono: string, texto: string): Promise<ResultadoEnvio>;
   enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio>;
-  /** Solo los proveedores que admiten plantillas (WhatsApp Cloud API de Meta). */
-  enviarPlantilla?(telefono: string, plantilla: PlantillaWhatsApp, documento?: Omit<DocumentoAdjunto, 'texto'>): Promise<ResultadoEnvio>;
 }

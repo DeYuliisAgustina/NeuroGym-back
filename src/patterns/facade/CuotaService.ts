@@ -7,7 +7,7 @@ import type {
   OrigenResultado,
   ResultadoOperacion,
 } from '../../integrations/mercadopago';
-import { plantilla, type ServicioMensajeria } from '../../integrations/mensajeria';
+import type { ServicioMensajeria } from '../../integrations/mensajeria';
 import { cuotaRepository } from '../../repositories/cuota.repository';
 import { registrarAuditoria } from '../../services/auditoria.service';
 import { generarCuotaSocio } from '../../services/cuotaGeneracion.service';
@@ -626,7 +626,6 @@ export class CuotaService {
         cuotaId: pago.cuotaId,
         tipoNotificacion: 'PAGO',
         documento: { nombreArchivo: `comprobante-${pago.comprobante.numero}.pdf` },
-        plantilla: plantilla('comprobante', socio.usuario.nombre, dinero(aNumero(pago.importe)), mesAnio(pago.cuota.periodo), pago.comprobante.numero),
       });
     } catch (error) {
       console.error('[WhatsApp] No se pudo registrar el envío del comprobante:', (error as Error).message);

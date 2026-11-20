@@ -1,11 +1,7 @@
-import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
-import { plantilla } from '../integrations/mensajeria';
 import { CobroDebitoAutomatico, CobroPagoUnico } from '../patterns/strategy';
 import { cuotaRepository } from '../repositories/cuota.repository';
-import { aNumero } from '../utils/dinero';
-import { aFechaDb, ahoraLocal, fechaIso, periodoDe } from '../utils/fechas';
-import { dinero, mesAnio } from './comprobantePdf.service';
+import { aFechaDb, ahoraLocal, periodoDe } from '../utils/fechas';
 import { notificacionService } from './notificacion.service';
 import { preciosParaSocio } from './precios.service';
 
@@ -50,17 +46,11 @@ export async function generarCuotasPeriodo(periodo = ahoraLocal().fecha.slice(0,
   return { periodo, creadas };
 }
 
-/** Variables de las plantillas de cuota: nombre, período, importe y vencimiento (dd/mm/aaaa). */
-function datosCuota(cuota: { periodo: string; importeFinal: Prisma.Decimal; fechaVencimiento: Date; socio: { usuario: { nombre: string } } }) {
-  const [anio, mes, dia] = fechaIso(cuota.fechaVencimiento).split('-');
-  return [cuota.socio.usuario.nombre, mesAnio(cuota.periodo), dinero(aNumero(cuota.importeFinal)), `${dia}/${mes}/${anio}`];
-}
-
 /** Tarea diaria: marca IMPAGA la cuota vencida y avisa al socio (RF33, RNF10). */
 export async function marcarCuotasVencidas(hoy = ahoraLocal().fecha) {
   const candidatas = await prisma.cuota.findMany({
     where: { estado: 'PENDIENTE', fechaVencimiento: { lt: aFechaDb(hoy) } },
-    include: { socio: { include: { usuario: { select: { nombre: true } } } } },
+    include: { socio: true },
   });
   // «Débito automático programado»: no se marca IMPAGA hasta conocer el resultado del débito.
   const vencidas = [];
@@ -69,15 +59,7 @@ export async function marcarCuotasVencidas(hoy = ahoraLocal().fecha) {
     await prisma.cuota.update({ where: { id: cuota.id }, data: { estado: 'IMPAGA' } });
     const mensaje = `Tu cuota ${cuota.periodo} venció y figura impaga. Podés abonarla desde "Cuotas y pagos".`;
     await notificacionService.notificar({ usuarioId: cuota.socio.usuarioId, tipo: 'VENCIMIENTO', mensaje });
-    await notificacionService.enviarMensaje({
-      usuarioId: cuota.socio.usuarioId,
-      telefono: cuota.socio.telefono,
-      tipo: 'VENCIMIENTO',
-      mensaje,
-      cuotaId: cuota.id,
-      referencia: `vencimiento:${cuota.id}:impaga`,
-      plantilla: plantilla('cuotaImpaga', ...datosCuota(cuota)),
-    });
+    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje, cuotaId: cuota.id, referencia: `vencimiento:${cuota.id}:impaga` });
   }
   return { impagas: vencidas.length };
 }
@@ -87,20 +69,12 @@ export async function avisarProximosVencimientos(hoy = ahoraLocal().fecha) {
   const limite = new Date(aFechaDb(hoy).getTime() + 3 * 86400000);
   const cuotas = await prisma.cuota.findMany({
     where: { estado: 'PENDIENTE', fechaVencimiento: { equals: limite } },
-    include: { socio: { include: { usuario: { select: { nombre: true } } } } },
+    include: { socio: true },
   });
   for (const cuota of cuotas) {
     const mensaje = `Recordatorio: tu cuota ${cuota.periodo} vence el ${cuota.fechaVencimiento.toISOString().slice(0, 10)}.`;
     await notificacionService.notificar({ usuarioId: cuota.socio.usuarioId, tipo: 'VENCIMIENTO', mensaje });
-    await notificacionService.enviarMensaje({
-      usuarioId: cuota.socio.usuarioId,
-      telefono: cuota.socio.telefono,
-      tipo: 'VENCIMIENTO',
-      mensaje,
-      cuotaId: cuota.id,
-      referencia: `vencimiento:${cuota.id}:recordatorio`,
-      plantilla: plantilla('vencimientoProximo', ...datosCuota(cuota)),
-    });
+    await notificacionService.enviarMensaje({ usuarioId: cuota.socio.usuarioId, telefono: cuota.socio.telefono, tipo: 'VENCIMIENTO', mensaje, cuotaId: cuota.id, referencia: `vencimiento:${cuota.id}:recordatorio` });
   }
   return { avisos: cuotas.length };
 }

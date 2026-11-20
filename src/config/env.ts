@@ -64,10 +64,6 @@ export const env = {
     webhookToken: process.env.WHATSAPP_WEBHOOK_TOKEN ?? '',
     metaAppSecret: process.env.WHATSAPP_APP_SECRET ?? '',
     metaVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? '',
-    // Meta: los avisos se envían como plantillas aprobadas (comprobante, vencimiento y
-    // recordatorio de turno). WHATSAPP_PLANTILLAS=false vuelve al texto libre (ventana de 24 h).
-    usarPlantillas: process.env.WHATSAPP_PLANTILLAS !== 'false',
-    idiomaPlantillas: process.env.WHATSAPP_PLANTILLAS_IDIOMA ?? 'es_AR',
     /** Proveedor elegido (WHATSAPP_PROVEEDOR) o deducido de las credenciales cargadas. */
     get proveedor(): 'DIALOG360_SANDBOX' | 'META_CLOUD_API' | 'SIMULADO' {
       const elegido = (process.env.WHATSAPP_PROVEEDOR ?? '').toLowerCase();

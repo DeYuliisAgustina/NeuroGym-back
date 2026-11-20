@@ -383,24 +383,13 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - Verificado: llamada real con 14 ejercicios de prueba → rutina de 3 días con 13 ejercicios en ~19 s y variante coherente (Sentadilla → Prensa). El backend en ejecución informa `generador: Gemini (gemini-3.5-flash)`. Pruebas: 4 unitarias nuevas (`tests/unit/ia-gemini.test.ts`); suite completa 185.
 - VS Code: la tarea «Levantar NeuroGym» se ejecuta sola al abrir la carpeta (`runOptions.runOn: folderOpen`), porque una actualización de VS Code había cerrado el backend y el frontend. VS Code puede pedir una vez permiso para las tareas automáticas.
 
-### WhatsApp con plantillas de Meta y recordatorio de turnos (2026-11-20)
+### Recordatorio de turnos por WhatsApp y direcciones sin /api (2026-11-20)
 
-- **Pedido de la autora:** por WhatsApp deben llegar el comprobante de la cuota pagada, el aviso antes del vencimiento y el recordatorio del turno con el nutricionista o deportólogo. Un conocido le explicó que con Meta solo se pueden enviar plantillas a quien no escribió antes. Es correcto: fuera de la ventana de 24 h, Meta solo entrega plantillas aprobadas.
-- **Plantillas** (`src/integrations/mensajeria/plantillas.ts`, guía en `docs/whatsapp-plantillas.md`):
-  - `neurogym_comprobante_pago`, con el PDF en el encabezado.
-  - `neurogym_vencimiento_cuota`, 3 días antes.
-  - `neurogym_cuota_impaga`.
-  - `neurogym_recordatorio_turno`.
-- **Cómo se envían:** `WhatsAppCloudApi.enviarPlantilla` arma el mensaje `type: template`, en idioma `es_AR`, con los parámetros en orden y sin saltos de línea. `crearServicioEnvios` usa la plantilla cuando el proveedor la admite (solo Meta) y `WHATSAPP_PLANTILLAS` no es `false`. El 360dialog sandbox y la simulación siguen con texto libre.
-- **Recordatorio de turnos (nuevo):** `recordarTurnosProfesionales`, todos los días a las 18 h. Avisa por la plataforma y por WhatsApp de las consultas CONFIRMADO o REPROGRAMADO del día siguiente. Es idempotente, con referencia `turno-recordatorio:{turno}:{fecha}`.
-- **Direcciones sin `/api`:** un GET o HEAD sin el prefijo `/api` ahora redirige con 308 a la misma ruta bajo `/api`. Por ejemplo, `/publico/planes-marketplace` lleva a `/api/publico/planes-marketplace`. Los POST y demás métodos siguen respondiendo 404. Así se resuelve el «RUTA_INEXISTENTE» que veía la autora al escribir la dirección sin `/api`.
-- **Pruebas:** 192 (antes 185).
-  - Unitarias de plantillas.
-  - Comprobante con el doble de Meta.
-  - Recordatorio: una sola vez y sin los cancelados.
-  - Redirección.
-- **Falta, del lado de Meta:** la cuenta estaba bloqueada por el método de pago (141006) y el perfil del negocio. Agregar la tarjeta y los datos reales le corresponde a la autora. Mientras tanto, el proveedor activo sigue siendo el 360dialog sandbox.
-- Se agregó `scripts/cargar-clave.ps1 VARIABLE`, que guarda en `.env` el valor del portapapeles sin mostrarlo.
+- **Pedido de la autora:** por WhatsApp deben llegar el comprobante de la cuota pagada, el aviso antes del vencimiento y el recordatorio del turno con el nutricionista o deportólogo. Los dos primeros ya existían; faltaba el tercero.
+- **Recordatorio de turnos (nuevo):** `recordarTurnosProfesionales`, todos los días a las 18 h. Avisa por la plataforma y por WhatsApp (sandbox de 360dialog) de las consultas CONFIRMADO o REPROGRAMADO del día siguiente. Es idempotente, con referencia `turno-recordatorio:{turno}:{fecha}`.
+- **Direcciones sin `/api`:** un GET o HEAD sin el prefijo redirige con 308 a la misma ruta bajo `/api` (por ejemplo, `/publico/planes-marketplace`). Los POST y demás métodos siguen respondiendo 404.
+- **WhatsApp con Meta: descartado a pedido de la autora.** Se probó el número de prueba de Meta: con la información del negocio y una tarjeta cargadas, la API acepta los envíos, pero Meta no los entrega (error 131031 «Business Account locked») porque el portfolio no pasó la verificación del negocio (141010), que exige documentación de un negocio real. Se abrió un caso en el soporte de Meta. La autora decidió seguir con el **sandbox de 360dialog**; se quitaron las plantillas de Meta del código. El adaptador `WhatsAppCloudApi` anterior queda sin cambios.
+- **Pruebas:** recordatorio (una sola vez y sin los cancelados) y redirección.
 
 ### Pendiente
 

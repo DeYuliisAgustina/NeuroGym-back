@@ -1,5 +1,5 @@
 import { env } from '../../config/env';
-import type { DocumentoAdjunto, PlantillaWhatsApp, ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
+import type { DocumentoAdjunto, ResultadoEnvio, ServicioMensajeria } from './ServicioMensajeria';
 
 /** Normaliza un teléfono argentino al formato internacional sin '+' que exige la API. */
 export function normalizarTelefono(telefono: string): string {
@@ -26,8 +26,6 @@ export interface OpcionesWhatsApp {
   /** Número habilitado en el entorno de prueba de Meta (obligatorio fuera de producción). */
   destinoPrueba: string;
   produccion: boolean;
-  /** Código de idioma con el que se crearon las plantillas (por defecto es_AR). */
-  idiomaPlantillas?: string;
 }
 
 /**
@@ -51,16 +49,13 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
       apiVersion: env.mensajeria.apiVersion,
       destinoPrueba: env.mensajeria.destinoPrueba,
       produccion: env.nodeEnv === 'production',
-      idiomaPlantillas: env.mensajeria.idiomaPlantillas,
     },
   ) {}
 
   /** Destino real del mensaje: en prueba, siempre el número habilitado. */
   destinoDe(telefono: string): string | null {
     if (this.opciones.produccion) return normalizarTelefono(telefono);
-    // La lista de destinatarios del número de prueba guarda los celulares argentinos
-    // sin el 9 (54 + característica + número): con «549…» Meta responde 131030.
-    const prueba = this.opciones.destinoPrueba.replace(/\D/g, '').replace(/^549/, '54');
+    const prueba = this.opciones.destinoPrueba.replace(/\D/g, '');
     return prueba || null;
   }
 
@@ -71,26 +66,6 @@ export class WhatsAppCloudApi implements ServicioMensajeria {
   /** Documento por enlace HTTPS: Meta lo descarga y lo entrega como archivo adjunto con caption. */
   async enviarDocumento(telefono: string, documento: DocumentoAdjunto): Promise<ResultadoEnvio> {
     return this.solicitar(telefono, { type: 'document', document: { link: documento.url, filename: documento.nombreArchivo, caption: documento.texto } });
-  }
-
-  /**
-   * Plantilla aprobada en WhatsApp Manager. Si lleva documento (comprobante), el PDF
-   * va en el encabezado de la plantilla, que debe ser de tipo «Documento».
-   */
-  async enviarPlantilla(telefono: string, plantilla: PlantillaWhatsApp, documento?: Omit<DocumentoAdjunto, 'texto'>): Promise<ResultadoEnvio> {
-    const componentes: Record<string, unknown>[] = [];
-    if (documento) {
-      componentes.push({ type: 'header', parameters: [{ type: 'document', document: { link: documento.url, filename: documento.nombreArchivo } }] });
-    }
-    if (plantilla.parametros.length) {
-      // Meta rechaza parámetros vacíos o con saltos de línea.
-      const texto = (p: string) => p.replace(/\s+/g, ' ').trim() || '-';
-      componentes.push({ type: 'body', parameters: plantilla.parametros.map((p) => ({ type: 'text', text: texto(p) })) });
-    }
-    return this.solicitar(telefono, {
-      type: 'template',
-      template: { name: plantilla.nombre, language: { code: this.opciones.idiomaPlantillas ?? 'es_AR' }, components: componentes },
-    });
   }
 
   private async solicitar(telefono: string, mensaje: Record<string, unknown>): Promise<ResultadoEnvio> {

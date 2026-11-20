@@ -3,7 +3,6 @@ import { prisma, type Tx } from '../config/prisma';
 import { gestorEventosTurno, type TurnoObservado } from '../patterns/observer';
 import { aNumero, redondear } from '../utils/dinero';
 import { noEncontrado, prohibido, reglaNegocio } from '../utils/errores';
-import { plantilla } from '../integrations/mensajeria';
 import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, fechaIso, horaTexto, minutosDeHora, sumarDias } from '../utils/fechas';
 import { GeneradorEventoCalendario } from '../utils/GeneradorEventoCalendario';
 import { notificacionService } from './notificacion.service';
@@ -151,7 +150,6 @@ export async function recordarTurnosProfesionales(hoy = ahoraLocal().fecha) {
       tipo: 'TURNO_PROFESIONAL',
       mensaje: `NeuroGym · ${mensaje}`,
       referencia,
-      plantilla: plantilla('recordatorioTurno', t.socio.usuario.nombre, especialidad, d.profesional, `${dia}/${mes}/${anio}`, d.horaInicio, modalidad),
     });
     if (envio.estado !== 'FALLIDO') enviados++;
   }
