@@ -31,7 +31,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
 
   it('CU-001-001/002/005: detalle e importes por medio; 10 % solo con débito (RD6)', async () => {
     const socio = await crearSocio(g.sedeA.id, 'PREMIUM');
-    const detalle = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const detalle = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(detalle.body.cuota).toMatchObject({ estado: 'PENDIENTE', cuotaBase: 30000, adicionalPremium: 10000 });
     const medios = await request(app).get(`/api/cuotas/${detalle.body.cuota.id}/medios`).set(conToken(socio.token));
     expect(medios.body.PAGO_UNICO.importeFinal).toBe(40000);
@@ -49,7 +49,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
   it('pago único aprobado: cuota PAGADA, comprobante y WhatsApp; la notificación repetida no duplica', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const inicio = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const inicio = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
     expect(inicio.status).toBe(201);
     expect(inicio.body).toMatchObject({ tipo: 'REDIRECCION' });
     const pagoId = inicio.body.pagoId;
@@ -71,11 +71,11 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(await prisma.pago.count({ where: { cuotaId: cuota.id, estado: 'APROBADO' } })).toBe(1);
     expect(mensajeria.enviados.length).toBe(enviadosAntes + 1);
 
-    const comp = await request(app).get(`/api/socio/pagos/${pagoId}/comprobante`).set(conToken(socio.token));
+    const comp = await request(app).get(`/api/pagos/${pagoId}/comprobante`).set(conToken(socio.token));
     expect(comp.body).toMatchObject({ periodo: cuota.periodo, medio: 'PAGO_UNICO', descuento: 0, importe: 30000, referencia: 'MP-123' });
 
     // «Descargar comprobante»: el mismo PDF que se envía por WhatsApp, con el mismo control de acceso.
-    expect(comp.body.rutaPdf).toBe(`/socio/pagos/${pagoId}/comprobante.pdf`);
+    expect(comp.body.rutaPdf).toBe(`/pagos/${pagoId}/comprobante.pdf`);
     const pdf = await request(app).get(`/api${comp.body.rutaPdf}`).set(conToken(socio.token)).buffer(true).parse((r, fin) => {
         const partes: Buffer[] = [];
         r.on('data', (p: Buffer) => partes.push(p));
@@ -95,13 +95,13 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect(admin.status).toBe(200);
     expect((await request(app).get(`/api/admin/pagos/${pagoId}/comprobante`).set(conToken(cobranzas.token))).body.rutaPdf).toBe(`/admin/pagos/${pagoId}/comprobante.pdf`);
     // Ya pagada: no admite iniciar otro pago.
-    expect((await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' })).status).toBe(422);
+    expect((await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' })).status).toBe(422);
   });
 
   it('5.1: pago rechazado → la cuota sigue pendiente', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const { body } = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
     await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-rech', aprobado: false });
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PENDIENTE');
     expect((await prisma.pago.findUniqueOrThrow({ where: { id: body.pagoId } })).estado).toBe('RECHAZADO');
@@ -122,7 +122,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
   it('6.1: si falla WhatsApp, la cuota queda pagada y el comprobante en el historial', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const { body } = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
     mensajeria.fallar = true;
     await cuotaService.registrarResultado({ tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'MP-falla', aprobado: true });
     mensajeria.fallar = false;
@@ -135,7 +135,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
       detalle: expect.stringContaining('Falla simulada'),
       fechaFallido: expect.any(Date),
     });
-    const vista = await request(app).get(`/api/socio/pagos/${body.pagoId}/comprobante`).set(conToken(socio.token));
+    const vista = await request(app).get(`/api/pagos/${body.pagoId}/comprobante`).set(conToken(socio.token));
     expect(vista.body).toMatchObject({ fechaEnvio: null, envioWhatsapp: { estado: 'FALLIDO' } });
 
     // Reenvío posterior (npm run whatsapp:probar): repite solo el mensaje, sin nuevos pagos ni comprobantes.
@@ -151,25 +151,26 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     // Un pago no aprobado no tiene comprobante para reenviar.
     const otro = await crearSocio(g.sedeA.id);
     const otraCuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: otro.id } });
-    const pendiente = await request(app).post(`/api/cuotas/${otraCuota.id}/pagos`).set(conToken(otro.token)).send({ medio: 'PAGO_UNICO' });
+    const pendiente = await request(app).post('/api/operaciones').set(conToken(otro.token)).send({ cuotaId: otraCuota.id, medio: 'PAGO_UNICO' });
     await expect(cuotaService.reenviarComprobante(pendiente.body.pagoId)).rejects.toMatchObject({ status: 404 });
   });
 
   it('CU-001-004 y débito: adhesión autorizada, débito con 10 % y baja de la adhesión', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const inicio = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'DEBITO_AUTOMATICO' });
+    const inicio = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'DEBITO_AUTOMATICO' });
     expect(inicio.body.tipo).toBe('REDIRECCION');
     expect(await prisma.adhesionDebito.count({ where: { socioId: socio.id } })).toBe(0); // se registra recién al autorizarse
     await cuotaService.registrarResultado({ tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-1', autorizada: true });
-    const programado = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'DEBITO_AUTOMATICO' });
+    const programado = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'DEBITO_AUTOMATICO' });
     expect(programado.body.tipo).toBe('DEBITO_PROGRAMADO');
     await cuotaService.registrarResultado({ tipo: 'DEBITO', idPreaprobacion: 'PRE-1', referenciaExterna: 'AP-1', aprobado: true, periodo: cuota.periodo });
     const pagada = await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } });
     expect(pagada).toMatchObject({ estado: 'PAGADA' });
     expect(Number(pagada.descuento)).toBe(3000);
     expect(Number(pagada.importeFinal)).toBe(27000);
-    const baja = await request(app).delete('/api/socio/debito').set(conToken(socio.token));
+    const adhesion = await prisma.adhesionDebito.findFirstOrThrow({ where: { socioId: socio.id, estado: 'ACTIVA' } });
+    const baja = await request(app).delete(`/api/adhesiones/${adhesion.id}`).set(conToken(socio.token));
     expect(baja.body.estado).toBe('CANCELADA');
   });
 
@@ -232,19 +233,19 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
 
   it('el webhook sin firma válida se rechaza', async () => {
     doble.actual.firmaValida = false;
-    const r = await request(app).post('/api/pagos/webhook').send({ type: 'payment', data: { id: '1' } });
+    const r = await request(app).post('/api/webhooks/mp').send({ type: 'payment', data: { id: '1' } });
     expect(r.status).toBe(401);
   });
 
   it('webhook firmado de una orden (Order): consulta la orden, la registra y es idempotente ante reenvíos', async () => {
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const { body } = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
     expect(body.url).toContain('https://');
     doble.actual.firmaValida = true;
     doble.actual.respuestas.set('ORD01TEST9001', { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9001', aprobado: true });
     const notificacion = { type: 'order', action: 'order.processed', data: { id: 'ORD01TEST9001' } };
-    const webhook = () => request(app).post('/api/pagos/webhook').query({ 'data.id': 'ORD01TEST9001', type: 'order' }).send(notificacion);
+    const webhook = () => request(app).post('/api/webhooks/mp').query({ 'data.id': 'ORD01TEST9001', type: 'order' }).send(notificacion);
     expect((await webhook()).body.procesado).toBe(true);
     expect((await webhook()).body.duplicado).toBe(true);
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
@@ -255,7 +256,7 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     const socio = await crearSocio(g.sedeA.id);
     const otro = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const { body } = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
     // Orden todavía abierta: no se registra nada y la cuota sigue pendiente.
     const pendiente = await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: body.pagoId });
     expect(pendiente.body).toMatchObject({ procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' });
@@ -271,8 +272,8 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     const socio = await crearSocio(g.sedeA.id);
     const otro = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
-    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
-    const verificar = (token: string) => request(app).post('/api/socio/pagos/verificacion').set(conToken(token));
+    const { body } = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'PAGO_UNICO' });
+    const verificar = (token: string) => request(app).post('/api/pagos/verificacion').set(conToken(token));
 
     // Mercado Pago todavía no tiene resultado: no se registra nada.
     expect((await verificar(socio.token)).body).toEqual({ revisados: 1, aprobados: 0, rechazados: 0 });

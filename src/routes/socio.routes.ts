@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { asistenciaController } from '../controllers/asistencia.controller';
-import { cuotaController } from '../controllers/cuota.controller';
 import { socioController } from '../controllers/socio.controller';
 import { turnoController } from '../controllers/turno.controller';
 import { autenticar, soloPerfiles } from '../middlewares/autenticacion.middleware';
@@ -24,11 +23,4 @@ socioRoutes.patch('/reservas/:id/cancelacion', turnoController.cancelarReserva);
 socioRoutes.post('/qr', asistenciaController.miQr);
 socioRoutes.get('/asistencias', asistenciaController.misAsistencias);
 
-// Cuotas y pagos (CU-001)
-socioRoutes.get('/cuota', cuotaController.detalle);
-socioRoutes.get('/debito/descuento', cuotaController.descuentoDebito);
-socioRoutes.delete('/debito', cuotaController.cancelarDebito);
-socioRoutes.get('/pagos', cuotaController.historial);
-socioRoutes.post('/pagos/verificacion', cuotaController.verificarPendientes);
-socioRoutes.get('/pagos/:id/comprobante', cuotaController.comprobante);
-socioRoutes.get('/pagos/:id/comprobante.pdf', cuotaController.comprobantePdf);
+// Cuotas y pagos (CU-001): ver operacion.routes.ts (rutas de los diagramas de secuencia).

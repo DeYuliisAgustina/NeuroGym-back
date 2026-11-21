@@ -6,7 +6,7 @@ import { cobranzaService } from '../services/cobranza.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { aFechaDb } from '../utils/fechas';
 import { idParam, validar } from '../utils/validar';
-import { filtroCuotasSchema, filtroPagosSchema, medioPagoSchema, retornoMercadoPagoSchema } from '../validations/operacion.validation';
+import { filtroCuotasSchema, filtroPagosSchema, operacionSchema, retornoMercadoPagoSchema } from '../validations/operacion.validation';
 import { periodoSchema } from '../validations/comunes.validation';
 
 /**
@@ -15,10 +15,11 @@ import { periodoSchema } from '../validations/comunes.validation';
  */
 export const cuotaController = {
   // ---------------- Socio (CU-001) ----------------
+  /** GET /api/cuotas/actual — CU-001-001. */
   async detalle(req: Request, res: Response) {
     res.json(await cuotaService.obtenerDetalleCuota(socioDe(req).socioId));
   },
-  /** POST /api/socio/pagos/verificacion — al abrir «Cuotas y pagos», confirma con Mercado Pago los pagos pendientes. */
+  /** POST /api/pagos/verificacion — al abrir «Cuotas y pagos», confirma con Mercado Pago los pagos pendientes. */
   async verificarPendientes(req: Request, res: Response) {
     res.json(await cuotaService.verificarPagosPendientes(socioDe(req).socioId));
   },
@@ -26,14 +27,16 @@ export const cuotaController = {
   async medios(req: Request, res: Response) {
     res.json(await cuotaService.obtenerImportesPorMedio(idParam(req.params.id), { socioId: socioDe(req).socioId }));
   },
+  /** GET /api/adhesiones/condiciones — CU-001-004 y CU-001-005. */
   async descuentoDebito(req: Request, res: Response) {
     res.json(await cuotaService.calcularDescuento(socioDe(req).socioId));
   },
-  /** POST /api/cuotas/{id}/pagos — inicia el pago con la estrategia del medio elegido. */
+  /** POST /api/operaciones — CU-001-003/004/006: inicia el pago con la estrategia del medio elegido. */
   async pagar(req: Request, res: Response) {
-    const { medio } = validar(medioPagoSchema, req.body);
-    res.status(201).json(await cuotaService.iniciarOperacion(idParam(req.params.id), medio, socioDe(req).socioId));
+    const { cuotaId, medio } = validar(operacionSchema, req.body);
+    res.status(201).json(await cuotaService.iniciarOperacion(cuotaId, medio, socioDe(req).socioId));
   },
+  /** GET /api/pagos?filtros — CU-001-008. */
   async historial(req: Request, res: Response) {
     const f = validar(filtroPagosSchema, req.query);
     res.json(
@@ -46,6 +49,7 @@ export const cuotaController = {
       }),
     );
   },
+  /** GET /api/pagos/{id}/comprobante — CU-001-009. */
   async comprobante(req: Request, res: Response) {
     const usuario = req.usuario!;
     const solicitante = usuario.tipo === 'SOCIO' ? { socioId: usuario.socioId! } : { gimnasioId: usuario.gimnasioId! };
@@ -60,8 +64,9 @@ export const cuotaController = {
       .set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdf.nombre}"`, 'Cache-Control': 'no-store, private' })
       .send(pdf.contenido);
   },
+  /** DELETE /api/adhesiones/{id} — CU-001-010. */
   async cancelarDebito(req: Request, res: Response) {
-    res.json(await cuotaService.cancelarAdhesion(socioDe(req).socioId));
+    res.json(await cuotaService.cancelarAdhesion(idParam(req.params.id), socioDe(req).socioId));
   },
 
   // ---------------- Personal de cobros ----------------
@@ -78,7 +83,7 @@ export const cuotaController = {
   },
 
   // ---------------- Mercado Pago ----------------
-  /** Webhook de Mercado Pago: responde 200 rápido; la firma se valida en la fachada. */
+  /** POST /api/webhooks/mp — webhook de Mercado Pago: responde 200 rápido; la firma se valida en la fachada. */
   async webhook(req: Request, res: Response) {
     const cuerpo = (req.body ?? {}) as { type?: string; action?: string };
     const resultado = await cuotaService.procesarWebhook({ encabezados: req.headers, query: req.query as Record<string, unknown>, cuerpo: req.body });

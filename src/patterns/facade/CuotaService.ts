@@ -14,7 +14,6 @@ import { generarCuotaSocio } from '../../services/cuotaGeneracion.service';
 import { dinero, mesAnio, pdfDeComprobante } from '../../services/comprobantePdf.service';
 import { crearServicioEnvios, type ServicioEnvios } from '../../services/envioMensajes.service';
 import { notificacionService } from '../../services/notificacion.service';
-import { preciosParaSocio } from '../../services/precios.service';
 import { aNumero } from '../../utils/dinero';
 import { ErrorApp, noEncontrado, reglaNegocio } from '../../utils/errores';
 import { aFechaDb, ahoraLocal, fechaIso, periodoDe, sumarDias } from '../../utils/fechas';
@@ -80,7 +79,7 @@ export class CuotaService {
    */
   async obtenerDetalleCuota(socioId: number) {
     const periodo = periodoActual();
-    const cuota = await cuotaRepository.cuotaDelPeriodo(socioId, periodo);
+    const cuota = await cuotaRepository.buscarCuotaDelPeriodo(socioId, periodo);
     const adhesion = await cuotaRepository.adhesionActiva(socioId);
     if (!cuota) return { cuota: null, adeudadas: [], adhesion, importes: null };
     const adeudadas = await cuotaRepository.cuotasAdeudadas(socioId, cuota.periodo);
@@ -97,7 +96,7 @@ export class CuotaService {
   async obtenerImportesPorMedio(cuotaId: number, solicitante: Solicitante): Promise<Record<MedioPago, ComposicionImporte>> {
     const cuota = await this.cuotaAccesible(cuotaId, solicitante);
     if (cuota.estado === 'PAGADA') throw reglaNegocio('CUOTA_PAGADA', 'La cuota ya está pagada');
-    const precios = await preciosParaSocio(cuota.socioId);
+    const precios = await cuotaRepository.obtenerPreciosVigentes(cuota.socioId);
     return Object.fromEntries(MEDIOS.map((m) => [m, this.seleccionarEstrategia(m).calcularImporte(precios)])) as Record<
       MedioPago,
       ComposicionImporte
@@ -106,16 +105,17 @@ export class CuotaService {
 
   /** CU-001-005: descuento por débito automático sobre el total del plan. */
   async calcularDescuento(socioId: number): Promise<ComposicionImporte> {
-    return this.seleccionarEstrategia('DEBITO_AUTOMATICO').calcularImporte(await preciosParaSocio(socioId));
+    return this.seleccionarEstrategia('DEBITO_AUTOMATICO').calcularImporte(await cuotaRepository.obtenerPreciosVigentes(socioId));
   }
 
-  listarPagos(socioId: number, filtros: Parameters<typeof cuotaRepository.listarPagos>[1] = {}) {
-    return cuotaRepository.listarPagos(socioId, filtros);
+  /** CU-001-008: historial de pagos del socio. */
+  listarPagos(socioId: number, filtros: Parameters<typeof cuotaRepository.buscarPagos>[1] = {}) {
+    return cuotaRepository.buscarPagos(socioId, filtros);
   }
 
   /** CU-001-009: PDF del comprobante (el mismo que se envía por WhatsApp), con el mismo control de acceso. */
   async pdfComprobante(pagoId: number, solicitante: Solicitante) {
-    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    const pago = await cuotaRepository.buscarComprobante(pagoId);
     if (!pago || !pago.comprobante || !this.puedeVer(pago.cuota, solicitante)) throw noEncontrado('Comprobante');
     const pdf = await pdfDeComprobante(pagoId);
     if (!pdf) throw noEncontrado('Comprobante');
@@ -123,7 +123,7 @@ export class CuotaService {
   }
 
   async obtenerComprobante(pagoId: number, solicitante: Solicitante) {
-    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    const pago = await cuotaRepository.buscarComprobante(pagoId);
     if (!pago || !pago.comprobante || !this.puedeVer(pago.cuota, solicitante)) throw noEncontrado('Comprobante');
     const { cuota } = pago;
     // El envío por WhatsApp se informa según lo que confirmó el proveedor. Los
@@ -135,7 +135,7 @@ export class CuotaService {
     return {
       pagoId: pago.id,
       // Descarga del mismo PDF que se envía por WhatsApp, según quién consulta.
-      rutaPdf: 'socioId' in solicitante ? `/socio/pagos/${pago.id}/comprobante.pdf` : `/admin/pagos/${pago.id}/comprobante.pdf`,
+      rutaPdf: 'socioId' in solicitante ? `/pagos/${pago.id}/comprobante.pdf` : `/admin/pagos/${pago.id}/comprobante.pdf`,
       numero: pago.comprobante.numero,
       fechaEmision: pago.comprobante.fechaEmision,
       fechaEnvio: confirmado ? pago.comprobante.fechaEnvio : null,
@@ -171,7 +171,7 @@ export class CuotaService {
       const cuota = await this.cuotaAccesible(cuotaId, { socioId });
       if (cuota.estado === 'PAGADA') throw reglaNegocio('CUOTA_PAGADA', 'La cuota ya está pagada');
       if (await cuotaRepository.debitoProgramado(cuota, periodo)) throw DEBITO_PROGRAMADO();
-      return { tipo: 'INFORMADO' as const, composicion: estrategia.calcularImporte(await preciosParaSocio(socioId)) };
+      return { tipo: 'INFORMADO' as const, composicion: estrategia.calcularImporte(await cuotaRepository.obtenerPreciosVigentes(socioId)) };
     }
     return prisma.$transaction(async (tx) => {
       await cuotaRepository.bloquear(cuotaId, tx);
@@ -193,7 +193,7 @@ export class CuotaService {
         if (await cuotaRepository.debitoProgramado(cuota, periodo, tx)) throw DEBITO_PROGRAMADO();
       }
       return estrategia.cobrar(
-        { id: cuota.id, periodo: cuota.periodo, socioId, precios: await preciosParaSocio(socioId, undefined, tx) },
+        { id: cuota.id, periodo: cuota.periodo, socioId, precios: await cuotaRepository.obtenerPreciosVigentes(socioId, undefined, tx) },
         {
           tx,
           socio: { id: socioId, email: cuota.socio.usuario.email, nombre: cuota.socio.usuario.nombre },
@@ -213,7 +213,7 @@ export class CuotaService {
       if (cuota.estado === 'PAGADA') throw reglaNegocio('CUOTA_PAGADA', 'La cuota ya está pagada');
       if (await cuotaRepository.debitoProgramado(cuota, periodoActual(), tx)) throw DEBITO_PROGRAMADO();
       const resultado = await this.seleccionarEstrategia('EFECTIVO').cobrar(
-        { id: cuota.id, periodo: cuota.periodo, socioId: cuota.socioId, precios: await preciosParaSocio(cuota.socioId, undefined, tx) },
+        { id: cuota.id, periodo: cuota.periodo, socioId: cuota.socioId, precios: await cuotaRepository.obtenerPreciosVigentes(cuota.socioId, undefined, tx) },
         {
           tx,
           socio: { id: cuota.socioId, email: cuota.socio.usuario.email, nombre: cuota.socio.usuario.nombre },
@@ -234,9 +234,9 @@ export class CuotaService {
   }
 
   /** CU-001-010: baja de la adhesión; desde la cuota siguiente se cobra el importe completo. */
-  async cancelarAdhesion(socioId: number) {
+  async cancelarAdhesion(adhesionId: number, socioId: number) {
     const adhesion = await cuotaRepository.adhesionActiva(socioId);
-    if (!adhesion) throw reglaNegocio('SIN_ADHESION', 'No tenés un débito automático activo');
+    if (!adhesion || adhesion.id !== adhesionId) throw reglaNegocio('SIN_ADHESION', 'No tenés un débito automático activo');
     try {
       await this.gateway.cancelarDebito(adhesion.idPreaprobacion);
     } catch {
@@ -252,7 +252,7 @@ export class CuotaService {
    */
   private async darDeBajaLocal(tx: Tx, adhesion: { id: number; socioId: number }, accion: string, detalle: Prisma.InputJsonValue) {
     const hoy = ahoraLocal().fecha;
-    const actualizada = await tx.adhesionDebito.update({ where: { id: adhesion.id }, data: { estado: 'CANCELADA', fechaBaja: aFechaDb(hoy) } });
+    const actualizada = await cuotaRepository.actualizarAdhesion(adhesion.id, { estado: 'CANCELADA', fechaBaja: aFechaDb(hoy) }, tx);
     await this.marcarVencidasImpagas(tx, adhesion.socioId);
     await registrarAuditoria({ accion, entidad: 'adhesion_debito', entidadId: adhesion.id, detalle }, tx);
     return actualizada;
@@ -378,19 +378,19 @@ export class CuotaService {
       await cuotaRepository.bloquear(pago.cuotaId, tx);
       const cuota = await tx.cuota.findUniqueOrThrow({ where: { id: pago.cuotaId } });
       if (!op.aprobado) {
-        await tx.pago.update({ where: { id: pago.id }, data: { estado: 'RECHAZADO', referenciaExterna: op.referenciaExterna } });
+        await cuotaRepository.guardarResultado(pago.id, { estado: 'RECHAZADO', referenciaExterna: op.referenciaExterna }, tx);
         await this.notificarSocio(tx, cuota.socioId, `Mercado Pago rechazó el pago de la cuota ${cuota.periodo}. La cuota sigue pendiente.`);
         return { procesado: true, pagoId: pago.id, aprobado: false };
       }
       if (cuota.estado === 'PAGADA') {
         // La cuota ya se abonó por otro medio: se registra para su devolución manual.
-        await tx.pago.update({ where: { id: pago.id }, data: { referenciaExterna: op.referenciaExterna } });
+        await cuotaRepository.guardarResultado(pago.id, { referenciaExterna: op.referenciaExterna }, tx);
         await registrarAuditoria({ accion: 'PAGO_SOBRE_CUOTA_PAGADA', entidad: 'pago', entidadId: pago.id }, tx);
         return { procesado: true, pagoId: pago.id, aprobado: false };
       }
-      await tx.pago.update({ where: { id: pago.id }, data: { estado: 'APROBADO', referenciaExterna: op.referenciaExterna } });
+      await cuotaRepository.guardarResultado(pago.id, { estado: 'APROBADO', referenciaExterna: op.referenciaExterna }, tx);
       // La composición se calcula con los precios vigentes al iniciar el pago.
-      const precios = await preciosParaSocio(cuota.socioId, ahoraLocal(pago.fecha).fecha, tx);
+      const precios = await cuotaRepository.obtenerPreciosVigentes(cuota.socioId, ahoraLocal(pago.fecha).fecha, tx);
       await this.confirmarPago(tx, pago.id, this.estrategias.PAGO_UNICO.calcularImporte(precios));
       return { procesado: true, pagoId: pago.id, aprobado: true };
     });
@@ -442,7 +442,7 @@ export class CuotaService {
           return { procesado: false, pendienteConciliacion: true, aprobado: false };
         }
         const composicion = await this.composicionDebito(cuota.socioId, op, tx);
-        await tx.pago.update({ where: { id: existente.id }, data: { estado: 'APROBADO', importe: op.importe ?? composicion.importeFinal } });
+        await cuotaRepository.guardarResultado(existente.id, { estado: 'APROBADO', importe: op.importe ?? composicion.importeFinal }, tx);
         await this.confirmarPago(tx, existente.id, composicion);
         await registrarAuditoria({ accion: 'DEBITO_REGISTRADO', entidad: 'pago', entidadId: existente.id, detalle: { ...detalle, reintento: true } }, tx);
         return { procesado: true, pagoId: existente.id, aprobado: true };
@@ -463,17 +463,17 @@ export class CuotaService {
         return { procesado: false, pendienteConciliacion: true, aprobado: false };
       }
       const composicion = await this.composicionDebito(adhesion.socioId, op, tx);
-      const pago = await tx.pago.create({
-        data: {
+      const pago = await cuotaRepository.guardarDebito(
+        {
           cuotaId: cuota.id,
           adhesionId: adhesion.id,
-          medio: 'DEBITO_AUTOMATICO',
           // Se guarda lo que efectivamente cobró Mercado Pago; una diferencia queda auditada.
           importe: op.importe ?? composicion.importeFinal,
           estado: op.aprobado ? 'APROBADO' : 'RECHAZADO',
           referenciaExterna: op.referenciaExterna,
         },
-      });
+        tx,
+      );
       if (op.importe !== undefined && Math.abs(op.importe - composicion.importeFinal) >= 0.01) {
         await registrarAuditoria(
           { accion: 'DIFERENCIA_IMPORTE_DEBITO', entidad: 'pago', entidadId: pago.id, detalle: { ...detalle, importeEsperado: composicion.importeFinal } },
@@ -484,7 +484,7 @@ export class CuotaService {
         await this.confirmarPago(tx, pago.id, composicion);
       } else {
         // Débito rechazado: la cuota deja de estar programada; si ya venció, figura impaga.
-        if (fechaIso(cuota.fechaVencimiento) < ahoraLocal().fecha) await tx.cuota.update({ where: { id: cuota.id }, data: { estado: 'IMPAGA' } });
+        if (fechaIso(cuota.fechaVencimiento) < ahoraLocal().fecha) await cuotaRepository.actualizarCuota(cuota.id, { estado: 'IMPAGA' }, tx);
         await this.notificarSocio(tx, adhesion.socioId, `No se pudo debitar la cuota ${cuota.periodo}. Podés pagarla con Mercado Pago o en efectivo.`);
       }
       await registrarAuditoria({ accion: 'DEBITO_REGISTRADO', entidad: 'pago', entidadId: pago.id, detalle }, tx);
@@ -495,7 +495,7 @@ export class CuotaService {
   /** Composición del débito con los precios vigentes a la fecha del cobro (RD6, RD12). */
   private async composicionDebito(socioId: number, op: CobroDeSuscripcion, tx: Tx) {
     const fecha = op.fechaDebito ? ahoraLocal(new Date(op.fechaDebito)).fecha : undefined;
-    return this.estrategias.DEBITO_AUTOMATICO.calcularImporte(await preciosParaSocio(socioId, fecha, tx));
+    return this.estrategias.DEBITO_AUTOMATICO.calcularImporte(await cuotaRepository.obtenerPreciosVigentes(socioId, fecha, tx));
   }
 
   /** Deja un cobro sin imputar en auditoría una sola vez por cobro de Mercado Pago. */
@@ -568,9 +568,7 @@ export class CuotaService {
         return { procesado: true };
       }
       if (await cuotaRepository.adhesionActiva(op.socioId, tx)) return { procesado: false, duplicado: true };
-      await tx.adhesionDebito.create({
-        data: { socioId: op.socioId, idPreaprobacion: op.idPreaprobacion, estado: 'ACTIVA', fechaAlta: new Date(`${ahoraLocal().fecha}T00:00:00Z`) },
-      });
+      await cuotaRepository.guardarAdhesion({ socioId: op.socioId, idPreaprobacion: op.idPreaprobacion, fechaAlta: new Date(`${ahoraLocal().fecha}T00:00:00Z`) }, tx);
       await this.notificarSocio(tx, op.socioId, 'Tu adhesión al débito automático quedó activa: tus cuotas tendrán 10 % de descuento.');
       return { procesado: true };
     });
@@ -606,17 +604,18 @@ export class CuotaService {
   /** CU-001-007 pasos 1 y 2: cuota PAGADA con su composición y comprobante emitido. */
   private async confirmarPago(tx: Tx, pagoId: number, composicion: ComposicionImporte) {
     const pago = await tx.pago.findUniqueOrThrow({ where: { id: pagoId } });
-    await tx.cuota.update({
-      where: { id: pago.cuotaId },
-      data: {
+    await cuotaRepository.actualizarCuota(
+      pago.cuotaId,
+      {
         estado: 'PAGADA',
         cuotaBase: composicion.cuotaBase,
         adicionalPremium: composicion.adicionalPremium,
         descuento: composicion.descuento,
         importeFinal: composicion.importeFinal,
       },
-    });
-    await tx.comprobante.create({ data: { pagoId, numero: `NG-${String(pagoId).padStart(8, '0')}` } });
+      tx,
+    );
+    await cuotaRepository.guardarComprobante(pagoId, `NG-${String(pagoId).padStart(8, '0')}`, tx);
   }
 
   /** CU-001-007 paso 3: envío por WhatsApp. Si falla, el comprobante queda en el historial (3.1). */
@@ -625,7 +624,7 @@ export class CuotaService {
    * ni comprobantes ni consulta a Mercado Pago: solo repite el envío.
    */
   async reenviarComprobante(pagoId: number) {
-    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    const pago = await cuotaRepository.buscarComprobante(pagoId);
     if (!pago?.comprobante || pago.estado !== 'APROBADO') throw noEncontrado('Comprobante');
     // Reenvío explícito: referencia propia para no confundirlo con el envío original.
     const envio = await this.enviarComprobante(pagoId, { avisoInterno: false, referencia: `comprobante:${pago.comprobante.id}:reenvio:${Date.now()}` });
@@ -638,7 +637,7 @@ export class CuotaService {
    * La fecha de envío del comprobante la completa el webhook del proveedor.
    */
   private async enviarComprobante(pagoId: number, opciones: { avisoInterno?: boolean; referencia?: string } = {}) {
-    const pago = await cuotaRepository.comprobanteDePago(pagoId);
+    const pago = await cuotaRepository.buscarComprobante(pagoId);
     if (!pago?.comprobante) return null;
     const { socio } = pago.cuota;
     // Acompaña al PDF (caption); el comprobante completo es el archivo adjunto.

@@ -80,7 +80,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
     expect(auditoria.detalle).toMatchObject({ origen: 'WEBHOOK', cobro: pago.referenciaExterna, periodo: actual });
 
     // Detalle del socio: muestra el período en curso y, aparte, la deuda anterior a elegir.
-    const detalle = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const detalle = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(detalle.body.cuota).toMatchObject({ periodo: actual, estado: 'PAGADA', mediosHabilitados: [] });
     expect(detalle.body.adeudadas).toEqual([expect.objectContaining({ periodo: anterior, estado: 'IMPAGA', mediosHabilitados: ['PAGO_UNICO', 'EFECTIVO'] })]);
   });
@@ -126,15 +126,15 @@ describe('Imputación del débito automático al período facturado y conciliaci
     // Después del vencimiento, la tarea diaria no la marca impaga (débito todavía no informado).
     await marcarCuotasVencidas(`${actual}-25`);
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } })).estado).toBe('PENDIENTE');
-    const detalle = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const detalle = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(detalle.body.cuota).toMatchObject({ debitoProgramado: true, mediosHabilitados: [], fechaVencimiento: fechaIso(delPeriodo.fechaVencimiento) });
 
     // Mientras tanto no se admite otro medio para esa cuota; la anterior sí se puede regularizar.
-    const unico = await request(app).post(`/api/cuotas/${delPeriodo.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const unico = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: delPeriodo.id, medio: 'PAGO_UNICO' });
     expect(unico.body.error).toBe('DEBITO_PROGRAMADO');
     expect((await request(app).post(`/api/admin/cuotas/${delPeriodo.id}/efectivo`).set(conToken(cobranzas.token))).body.error).toBe('DEBITO_PROGRAMADO');
-    expect((await request(app).post(`/api/cuotas/${vieja.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' })).status).toBe(201);
-    expect((await request(app).post(`/api/cuotas/${vieja.id}/pagos`).set(conToken(socio.token)).send({ medio: 'DEBITO_AUTOMATICO' })).body.error).toBe(
+    expect((await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: vieja.id, medio: 'PAGO_UNICO' })).status).toBe(201);
+    expect((await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: vieja.id, medio: 'DEBITO_AUTOMATICO' })).body.error).toBe(
       'DEBITO_SOLO_PERIODO',
     );
 
@@ -143,7 +143,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
     await cuotaService.registrarResultado(cobro);
     const rechazada = await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } });
     expect(rechazada.estado).toBe(fechaIso(rechazada.fechaVencimiento) < ahoraLocal().fecha ? 'IMPAGA' : 'PENDIENTE');
-    const tras = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const tras = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(tras.body.cuota).toMatchObject({ debitoProgramado: false, mediosHabilitados: ['PAGO_UNICO', 'EFECTIVO'] });
 
     // Mercado Pago reintenta el mismo cobro y lo aprueba: se registra sin duplicar.
@@ -158,7 +158,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
     const socio = await crearSocio(g.sedeA.id);
     const cuota = await prisma.cuota.findUniqueOrThrow({ where: { socioId_periodo: { socioId: socio.id, periodo: actual } } });
     await request(app).post(`/api/admin/cuotas/${cuota.id}/efectivo`).set(conToken(cobranzas.token));
-    const r = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'DEBITO_AUTOMATICO' });
+    const r = await request(app).post('/api/operaciones').set(conToken(socio.token)).send({ cuotaId: cuota.id, medio: 'DEBITO_AUTOMATICO' });
     expect(r.body.tipo).toBe('REDIRECCION');
     const solicitud = doble.actual.debitosCreados.at(-1)!;
     expect(solicitud.importeMensual).toBe(27000);
@@ -167,7 +167,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
     // Con la cuota del período pendiente, el primer cobro es inmediato (sin fecha de inicio).
     const otro = await crearSocio(g.sedeA.id);
     const pendiente = await prisma.cuota.findUniqueOrThrow({ where: { socioId_periodo: { socioId: otro.id, periodo: actual } } });
-    await request(app).post(`/api/cuotas/${pendiente.id}/pagos`).set(conToken(otro.token)).send({ medio: 'DEBITO_AUTOMATICO' });
+    await request(app).post('/api/operaciones').set(conToken(otro.token)).send({ cuotaId: pendiente.id, medio: 'DEBITO_AUTOMATICO' });
     expect(doble.actual.debitosCreados.at(-1)!.fechaInicio).toBeUndefined();
   });
 
@@ -196,11 +196,11 @@ describe('Imputación del débito automático al período facturado y conciliaci
     const { socio, delPeriodo } = await socioConDeuda();
     await adherir(socio.id, 'PRE-PAUSA');
     await prisma.cuota.update({ where: { id: delPeriodo.id }, data: { estado: 'PENDIENTE' } });
-    expect((await request(app).get('/api/socio/cuota').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
+    expect((await request(app).get('/api/cuotas/actual').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
 
     const pausa = { tipo: 'ADHESION', socioId: socio.id, idPreaprobacion: 'PRE-PAUSA', autorizada: false, estado: 'paused' } as const;
     expect(await cuotaService.registrarResultado(pausa, 'WEBHOOK')).toMatchObject({ procesado: true });
-    const pausada = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const pausada = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(pausada.body.cuota).toMatchObject({ debitoProgramado: false, mediosHabilitados: ['PAGO_UNICO', 'EFECTIVO'] });
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } })).estado).toBe(estadoEsperado(delPeriodo.fechaVencimiento));
     // La notificación repetida no duplica la pausa.
@@ -208,7 +208,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
 
     await prisma.cuota.update({ where: { id: delPeriodo.id }, data: { estado: 'PENDIENTE' } });
     await cuotaService.registrarResultado({ ...pausa, autorizada: true, estado: 'authorized' });
-    expect((await request(app).get('/api/socio/cuota').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
+    expect((await request(app).get('/api/cuotas/actual').set(conToken(socio.token))).body.cuota.debitoProgramado).toBe(true);
     expect((await prisma.adhesionDebito.findUniqueOrThrow({ where: { idPreaprobacion: 'PRE-PAUSA' } })).estado).toBe('ACTIVA');
   });
 
@@ -222,7 +222,7 @@ describe('Imputación del débito automático al período facturado y conciliaci
     const adhesion = await prisma.adhesionDebito.findUniqueOrThrow({ where: { idPreaprobacion: 'PRE-BAJA-MP' } });
     expect(adhesion.estado).toBe('CANCELADA');
     expect(await prisma.auditoria.count({ where: { accion: 'BAJA_DEBITO_EN_MERCADO_PAGO', entidadId: adhesion.id } })).toBe(1);
-    const detalle = await request(app).get('/api/socio/cuota').set(conToken(socio.token));
+    const detalle = await request(app).get('/api/cuotas/actual').set(conToken(socio.token));
     expect(detalle.body.cuota).toMatchObject({ debitoProgramado: false });
     expect(detalle.body.cuota.mediosHabilitados).toContain('PAGO_UNICO');
     expect((await prisma.cuota.findUniqueOrThrow({ where: { id: delPeriodo.id } })).estado).toBe(estadoEsperado(delPeriodo.fechaVencimiento));

@@ -135,7 +135,7 @@ Prefijo `/api`. Respuestas JSON; errores con `{ error, mensaje, detalle }`.
 | `/socio/*` | Socio | Perfil y plan, turnos y reservas, QR, cuota y pagos, rutina, entrenamientos, equipamiento e incidencias, beneficios, marketplace |
 | `/cuotas/:id/medios`, `/cuotas/:id/pagos` | Socio | CU-001 |
 | `/asistencias/qr`, `/asistencias/autorizaciones`, `/asistencias/manual`, `/rechazos` | Personal de recepción | CU-004 |
-| `/pagos/webhook` | Mercado Pago | Notificaciones firmadas (idempotentes) |
+| `/webhooks/mp` (y `/pagos/webhook`) | Mercado Pago | Notificaciones firmadas (idempotentes) |
 | `/profesional/*` | Profesional | Registro, perfil, servicios, disponibilidad, métodos de pago, agenda, comisiones |
 | `/turnos-profesionales/:id/*` | Socio y profesional | Cancelación, reprogramación, eventos, `.ics` |
 | `/notificaciones` | Todos | Notificaciones internas |

@@ -49,7 +49,7 @@ export interface DatosComprobante {
 
 /** Datos históricos del comprobante de un pago aprobado (los mismos que muestra la interfaz). */
 export async function datosComprobante(pagoId: number): Promise<DatosComprobante | null> {
-  const pago = await cuotaRepository.comprobanteDePago(pagoId);
+  const pago = await cuotaRepository.buscarComprobante(pagoId);
   if (!pago?.comprobante || pago.estado !== 'APROBADO') return null;
   const { cuota } = pago;
   return {

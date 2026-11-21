@@ -17,6 +17,8 @@ export const asistenciaManualSchema = z.object({
 export const filtroAsistenciasSchema = z.object({ sedeId: idSchema.optional(), fecha: fechaSchema.optional() });
 
 export const medioPagoSchema = z.object({ medio: z.enum(['PAGO_UNICO', 'DEBITO_AUTOMATICO', 'EFECTIVO']) });
+/** POST /api/operaciones (CU-001): cuota elegida y medio de pago. */
+export const operacionSchema = medioPagoSchema.extend({ cuotaId: idSchema });
 export const filtroPagosSchema = z.object({
   medio: z.enum(['PAGO_UNICO', 'DEBITO_AUTOMATICO', 'EFECTIVO']).optional(),
   desde: fechaSchema.optional(),

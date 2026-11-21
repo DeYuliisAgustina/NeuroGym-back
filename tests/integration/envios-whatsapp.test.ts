@@ -127,7 +127,7 @@ describe('WhatsApp: envío automático, estados reales e idempotencia', () => {
     expect(final).toMatchObject({ estado: 'LEIDO', fechaEntregado: expect.any(Date), fechaLeido: expect.any(Date) });
 
     // El socio ve el estado real en su comprobante.
-    const vista = await request(app).get(`/api/socio/pagos/${pago.id}/comprobante`).set(conToken(socio.token));
+    const vista = await request(app).get(`/api/pagos/${pago.id}/comprobante`).set(conToken(socio.token));
     expect(vista.body).toMatchObject({ fechaEnvio: expect.any(String), envioWhatsapp: { estado: 'LEIDO', proveedor: 'DIALOG360_SANDBOX' } });
     // Token incorrecto: rechazado.
     await request(app).post('/api/whatsapp/webhook/360dialog/otro').send(webhook([{ id, status: 'read' }])).expect(401);
