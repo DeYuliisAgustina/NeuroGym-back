@@ -67,8 +67,15 @@ export const entrenamientoService = {
     try {
       generada = await servicioIA.generarRutina({ ...guardadas, evitar }, paraIA);
     } catch (error) {
-      // CU-003 4.1: si la IA falla, se informa y se conserva la rutina vigente.
-      if (error instanceof ErrorServicioIA) throw new ErrorApp(502, 'IA_NO_DISPONIBLE', 'No pudo generarse la rutina. Se conserva tu rutina vigente.');
+      // CU-003 4.1: si la IA falla, se informa y se conserva la rutina vigente (si la hay).
+      if (error instanceof ErrorServicioIA) {
+        const tieneRutina = (await rutinaRepository.rutinaVigente(socio.socioId)) !== null;
+        throw new ErrorApp(
+          502,
+          'IA_NO_DISPONIBLE',
+          `La IA no pudo generar la rutina en este momento. ${tieneRutina ? 'Se conserva tu rutina vigente. ' : ''}Probá de nuevo en unos minutos.`,
+        );
+      }
       throw error;
     }
     await rutinaRepository.reemplazarRutina(socio.socioId, generada);

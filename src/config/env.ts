@@ -84,7 +84,7 @@ export const env = {
     geminiApiKey: process.env.GEMINI_API_KEY ?? '',
     geminiModelo: process.env.GEMINI_MODELO ?? 'gemini-3.5-flash',
     // Modelos de respaldo si el principal está saturado (503) o agotó su cupo gratuito (429).
-    geminiModelosRespaldo: (process.env.GEMINI_MODELOS_RESPALDO ?? 'gemini-flash-lite-latest')
+    geminiModelosRespaldo: (process.env.GEMINI_MODELOS_RESPALDO ?? 'gemini-3.5-flash-lite,gemini-flash-lite-latest')
       .split(',')
       .map((m) => m.trim())
       .filter(Boolean),
