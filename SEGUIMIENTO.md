@@ -432,6 +432,20 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - Verificado: backend 198 pruebas (7 nuevas de autorregistro), frontend 27 (registro del socio y confirmación del alta); en el navegador, registro, ingreso bloqueado y alta confirmada.
 - TFI: se actualizan RF2, el diccionario (`socio.pendiente_alta`), el DER y el diagrama de clases (`Socio.pendienteAlta`).
 
+### Código y diagramas: misma nomenclatura (2026-11-21)
+
+A pedido de la autora («el código debe coincidir con el diagrama»), el código se adapta a los diagramas del TFI sin cambiar el comportamiento. Transcripción de las 40 secuencias: `docs/trazabilidad/secuencias.md`.
+
+- **Secuencias (Figuras 68 a 107) — hecho.** Rutas, controladores, servicios y repositorios con los nombres de cada diagrama, un commit por caso de uso (back `d2eeebd`, `6f44699`, `57abf9f`, `bb56e82`; front `a4705ed`, `7f39164`, `abf8aa9`, `c8abf52`):
+  - CU-001: `/api/cuotas/actual`, `/api/operaciones`, `/api/adhesiones/condiciones`, `DELETE /api/adhesiones/{id}`, `/api/pagos`, `/api/pagos/{id}/comprobante`, `/api/webhooks/mp` (se mantiene `/api/pagos/webhook` por el panel de Mercado Pago); CuotaRepository con los nombres de las secuencias.
+  - CU-002: `/api/indicadores`, `/api/senales`, `/api/socios/{id}/asistencia`, `/api/propuestas`, `/api/propuestas/{id}/aprobacion`, `/api/analitica`, `/api/analitica/socios/{id}`, `/api/analitica/reporte`, `/api/decisiones`; nuevos RetencionRepository, AnaliticaService, AnaliticaRepository e IntelligenceController.
+  - CU-003: `/api/socios/preferencias`, `/api/rutinas`, `/api/rutinas/actual`, `/api/equipos/disponibilidad`, `/api/ejercicios/{id}` (o `{ variante }`), `/api/ejercicios/{id}/variante`, `/api/entrenamientos`; `entrenamiento.*` pasó a `rutina.*`; nuevo EquipamientoRepository.
+  - CU-004: `/api/qr/validacion` → `/api/reservas/vigente` → `/api/cuotas/{socioId}/estado` → `/api/asistencias` (confirmar vuelve a verificar QR, reserva y cuota), `/api/autorizaciones`, `/api/rechazos`, `/api/asistencias/manual`; nuevo SocioRepository.
+  - Desvío conocido: en la Fig. 85 «Preparar propuesta» va por `POST /api/decisiones` (registra la decisión y, con ella, la propuesta); la Fig. 103 autoriza y registra la asistencia en un solo `POST /api/autorizaciones` (la autorización exige la asistencia en el modelo de datos).
+  - Verificado: backend 199 pruebas, frontend 33; en el navegador, Cuotas y pagos (comprobante y PDF), Constancia y regreso, Intelligence, Panel general, Mi rutina, Equipamiento y Recepción QR.
+- **Diagrama de clases — pendiente.** Una verificación estricta (atributo del modelo de esa clase; método declarado en esa clase) da 79 diferencias: unos 45 métodos de las clases del dominio viven hoy en servicios (por ejemplo `Cuota.marcarPagada()`, `Reserva.estaVigente()`), unos 25 atributos se llaman distinto que en la base (por ejemplo `Profesional.pausado` ↔ `publicacionPausada`), `SuscripcionSaaS`/`CodigoQR` se escriben `SuscripcionSaas`/`CodigoQr` y falta `ZonaEvitar` como tipo. Plan: capa `src/domain/` con una clase por clase del diagrama (sus atributos y métodos), usada por los servicios.
+- **Word — pendiente:** links a los repositorios y BMC en Anexos (como el ejemplo de la cátedra), columna «Resultado obtenido» y registro de ejecución en la caja blanca, ✓ en Arial (sin el símbolo) en la matriz de cubrimiento, alternativas y costos de cada patrón, numeración repetida 10.5.10 (Robustez y Casos de prueba) y «Desplieuge» (Figura 112). Guía para completar el checklist de la cátedra (59 ítems).
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
