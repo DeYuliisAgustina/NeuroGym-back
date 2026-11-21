@@ -67,8 +67,24 @@ describe('Reservas (RF3, RD18, RD23) y asistencia por QR (CU-004)', () => {
       const turno = await turnoDeHoy(sedeId);
       return prisma.reserva.create({ data: { turnoClaseId: turno.id, socioId } });
     };
-    const ingreso = (codigo: string, sedeId = g.sedeA.id, token = recepcion.token) =>
-      request(app).post('/api/asistencias/qr').set(conToken(token)).send({ codigo, sedeId });
+    /**
+     * Recepción como en los diagramas de secuencia: validar el QR (Fig. 99), verificar la
+     * reserva (Fig. 100) y la cuota (Fig. 101) y confirmar la asistencia (Fig. 105).
+     * Devuelve el mismo resultado que muestra la pantalla de recepción.
+     */
+    const ingreso = async (codigo: string, sedeId = g.sedeA.id, token = recepcion.token) => {
+      const h = conToken(token);
+      const rechazo = (r: { body: { error: string; mensaje: string } }) => ({ body: { resultado: r.body.error, mensaje: r.body.mensaje } });
+      const validacion = await request(app).post('/api/qr/validacion').set(h).send({ codigo });
+      if (validacion.status !== 200) return rechazo(validacion);
+      const { socioId, codigoQrId } = validacion.body;
+      const reserva = await request(app).get('/api/reservas/vigente').query({ socioId, sedeId }).set(h);
+      if (reserva.status !== 200) return rechazo(reserva);
+      const cuota = await request(app).get(`/api/cuotas/${socioId}/estado`).set(h);
+      if (!cuota.body.alDia) return { body: { resultado: 'CUOTA_PENDIENTE', ...cuota.body, reservaId: reserva.body.reservaId, codigoQrId } };
+      const asistencia = await request(app).post('/api/asistencias').set(h).send({ reservaId: reserva.body.reservaId, codigoQrId });
+      return asistencia.status === 201 ? asistencia : rechazo(asistencia);
+    };
 
     it('curso básico: valida el QR, registra la asistencia una sola vez y suma un día de constancia', async () => {
       const socio = await crearSocio(g.sedeA.id);
@@ -131,11 +147,13 @@ describe('Reservas (RF3, RD18, RD23) y asistencia por QR (CU-004)', () => {
       expect(aviso.body.resultado).toBe('CUOTA_PENDIENTE');
       expect(aviso.body.puedeAutorizar).toBe(true);
       expect(await prisma.asistencia.count({ where: { reservaId: aviso.body.reservaId } })).toBe(0);
+      const directa = await request(app).post('/api/asistencias').set(conToken(recepcion.token)).send({ reservaId: aviso.body.reservaId, codigoQrId: aviso.body.codigoQrId });
+      expect(directa.body.error).toBe('CUOTA_PENDIENTE');
       // Un rol de solo consulta no puede autorizar (CU-004-006).
-      const sinPermiso = await request(app).post('/api/asistencias/autorizaciones').set(conToken(consultaRecepcion.token)).send({ reservaId: aviso.body.reservaId, motivo: 'x' });
+      const sinPermiso = await request(app).post('/api/autorizaciones').set(conToken(consultaRecepcion.token)).send({ reservaId: aviso.body.reservaId, motivo: 'x' });
       expect(sinPermiso.status).toBe(403);
       const autorizada = await request(app)
-        .post('/api/asistencias/autorizaciones')
+        .post('/api/autorizaciones')
         .set(conToken(recepcion.token))
         .send({ reservaId: aviso.body.reservaId, codigoQrId: aviso.body.codigoQrId, motivo: 'Pagará mañana' });
       expect(autorizada.body.resultado).toBe('INGRESO_AUTORIZADO');

@@ -4,7 +4,12 @@ import { fechaSchema, idSchema, periodoSchema, textoSchema } from './comunes.val
 export const reservaSchema = z.object({ turnoId: idSchema });
 export const filtroDisponiblesSchema = z.object({ sedeId: idSchema.optional(), fecha: fechaSchema.optional(), dias: z.coerce.number().int().min(1).max(31).optional() });
 
-export const ingresoQrSchema = z.object({ codigo: z.string().trim().min(10).max(128), sedeId: idSchema });
+/** POST /api/qr/validacion — CU-004-002. */
+export const validacionQrSchema = z.object({ codigo: z.string().trim().min(10).max(128) });
+/** GET /api/reservas/vigente — CU-004-003. */
+export const reservaVigenteSchema = z.object({ socioId: idSchema, sedeId: idSchema });
+/** POST /api/asistencias — CU-004-008: reserva vigente y código QR validado. */
+export const confirmacionAsistenciaSchema = z.object({ reservaId: idSchema, codigoQrId: idSchema });
 export const autorizacionSchema = z.object({ reservaId: idSchema, codigoQrId: idSchema.optional(), motivo: textoSchema(255) });
 export const bloqueoSchema = z.object({ reservaId: idSchema, motivo: z.string().trim().max(255).optional() });
 export const asistenciaManualSchema = z.object({

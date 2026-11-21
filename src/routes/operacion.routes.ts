@@ -4,7 +4,7 @@ import { cuotaController } from '../controllers/cuota.controller';
 import { autenticar, soloPerfiles } from '../middlewares/autenticacion.middleware';
 import { requierePermiso as permiso } from '../middlewares/permisos.middleware';
 
-/** Rutas con los nombres de recurso usados en los diagramas de secuencia (CU-001 y CU-004). */
+/** Rutas de los diagramas de secuencia de CU-001 (Cuotas y pagos) y CU-004 (Recepción QR). */
 export const operacionRoutes = Router();
 
 // CU-001: rutas de los diagramas de secuencia (Figuras 68 a 77).
@@ -29,9 +29,12 @@ operacionRoutes.get('/pagos/integracion', cuotaController.estadoIntegracion);
 // Regreso local de la autorización del débito automático (Mercado Pago no admite "localhost").
 operacionRoutes.get('/pagos/retorno-adhesion', cuotaController.retornoAdhesion);
 
-// CU-004: recepción QR del personal autorizado
+// CU-004: recepción QR del personal autorizado (Figuras 99 a 107).
 const recepcion = [autenticar, soloPerfiles('PERSONAL'), permiso('RECEPCION', 'CONSULTA')];
-operacionRoutes.post('/asistencias/qr', ...recepcion, asistenciaController.ingresoQr);
-operacionRoutes.post('/asistencias/autorizaciones', ...recepcion, permiso('RECEPCION', 'GESTION'), asistenciaController.autorizar);
-operacionRoutes.post('/asistencias/manual', ...recepcion, permiso('RECEPCION', 'GESTION'), asistenciaController.manual);
-operacionRoutes.post('/rechazos', ...recepcion, asistenciaController.bloquear);
+operacionRoutes.post('/qr/validacion', ...recepcion, asistenciaController.validarCodigo); // Fig. 99
+operacionRoutes.get('/reservas/vigente', ...recepcion, asistenciaController.verificarReserva); // Fig. 100
+operacionRoutes.get('/cuotas/:socioId/estado', ...recepcion, asistenciaController.verificarCuota); // Fig. 101
+operacionRoutes.post('/asistencias', ...recepcion, asistenciaController.confirmarAsistencia); // Figs. 105 y 106
+operacionRoutes.post('/autorizaciones', ...recepcion, permiso('RECEPCION', 'GESTION'), asistenciaController.autorizarIngreso); // Fig. 103
+operacionRoutes.post('/rechazos', ...recepcion, asistenciaController.bloquearIngreso); // Fig. 104
+operacionRoutes.post('/asistencias/manual', ...recepcion, permiso('RECEPCION', 'GESTION'), asistenciaController.registrarManual); // Fig. 107
