@@ -397,6 +397,13 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - Se actualizaron en el lugar las 49 cuentas de la base de desarrollo (correo y contraseña), sin borrar ni regenerar datos: pagos, rutinas y turnos quedan igual. `prisma/seed.ts` crea los mismos correos. `WHATSAPP_SOCIOS_PRUEBA` pasa a `socio3@neurogym.test`.
 - Verificado contra el backend en ejecución: ingresan socio1, socio3, admin de ambos gimnasios, nutri1 y socio29; el correo anterior responde 401.
 
+### Generar rutina: zonas a evitar, IA visible y generación en segundo plano (2026-11-20)
+
+- **Zonas o movimientos a evitar (opcional):** casillas Espalda baja, Rodillas, Hombros, Muñecas y Saltos e impacto. La autora pidió poder indicar molestias; se descartó el texto libre porque serían datos de salud (sensibles según la Ley 25.326; el TFI dice que no se solicitan datos biométricos), se enviarían a un tercero (Google) y abren la puerta a instrucciones inyectadas. Con la lista cerrada es una preferencia de entrenamiento: **no se guarda** (`preferencia_rutina` no cambia), se valida con un enum (400 si llega otro valor) y los ejercicios que exigen esas zonas **se quitan del catálogo** antes de llamar a la IA (`exigeZonaEvitada`), además de indicárselo en el pedido aclarando que no es un diagnóstico. Verificado con Gemini: rutina sin ejercicios de rodilla ni zona lumbar.
+- **IA visible:** «Con tecnología de Gemini · Google» en el modal, «Gemini está preparando…» en el progreso e insignia «Generada con Gemini»; sin IA configurada se muestra «Modo simulación».
+- **Segundo plano (frontend):** el modal se cierra al confirmar; tarjeta de progreso en Mi rutina; el socio puede navegar; aviso al terminar y notificación del sistema (Notification API) si está en otra pestaña o ventana.
+- Pruebas: backend 190, frontend 24.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**

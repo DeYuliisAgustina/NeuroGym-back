@@ -49,6 +49,8 @@ export const preferenciasSchema = z.object({
   objetivo: z.enum(OBJETIVOS),
   nivel: z.enum(NIVELES),
   diasPorSemana: z.number().int().min(1).max(7),
+  // Lista cerrada de zonas a evitar (preferencia, no dato de salud); no se guarda.
+  evitar: z.array(z.enum(['ESPALDA_BAJA', 'RODILLAS', 'HOMBROS', 'MUNECAS', 'IMPACTO'])).max(5).optional(),
 });
 // CU-003-003 5.1: "Revisá el nombre, las series, las repeticiones y el peso."
 export const edicionEjercicioSchema = z.object({

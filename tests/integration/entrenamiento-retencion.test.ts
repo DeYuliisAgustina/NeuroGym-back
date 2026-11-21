@@ -47,6 +47,22 @@ describe('CU-003 rutinas con IA y CU-002 retención', () => {
       expect(ent.body).toMatchObject({ ejerciciosCompletados: 1, ejerciciosTotales: delDia1.length });
     });
 
+    it('zonas a evitar: lista cerrada, no se guardan y quitan del catálogo los ejercicios que las exigen', async () => {
+      const socio = await crearSocio(g.sedeA.id);
+      const h = conToken(socio.token);
+      const invalida = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['TENGO_HERNIA'] });
+      expect(invalida.status).toBe(400);
+      const r = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['RODILLAS', 'MUNECAS'] });
+      expect(r.status).toBe(201);
+      const nombres: string[] = r.body.rutina.ejercicios.map((e: { nombre: string }) => e.nombre);
+      expect(nombres.length).toBeGreaterThan(0);
+      // Sentadilla (rodillas), Flexiones, Plancha y Press de banca (muñecas) no se ofrecen.
+      expect(nombres.filter((n) => ['Sentadilla', 'Flexiones', 'Plancha', 'Press de banca'].includes(n))).toEqual([]);
+      const guardadas = await prisma.preferenciaRutina.findUniqueOrThrow({ where: { socioId: socio.id } });
+      expect(guardadas).toMatchObject({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2 });
+      expect(guardadas).not.toHaveProperty('evitar');
+    });
+
     it('CU-003-003/005: edición con validación de rangos', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(socio.token);

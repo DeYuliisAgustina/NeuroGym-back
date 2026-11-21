@@ -1,10 +1,38 @@
 import { z } from 'zod';
 
-/** Preferencias informadas por el socio, sin datos biométricos (RD15). */
+/**
+ * Zonas o movimientos que el socio prefiere evitar. Es una PREFERENCIA de
+ * entrenamiento elegida de una lista cerrada (no un diagnóstico ni texto libre):
+ * no se guarda en la base y solo se usa en la generación que la incluye.
+ */
+export const ZONAS_EVITAR = {
+  ESPALDA_BAJA: { texto: 'la zona lumbar (espalda baja)', excluir: /sentadilla con barra|remo con mancuerna|remo ergómetro/i },
+  RODILLAS: { texto: 'las rodillas', excluir: /sentadilla|estocadas|sillón de cuádriceps|prensa de piernas/i },
+  HOMBROS: { texto: 'los hombros', excluir: /press militar|press de hombros|vuelos laterales|fondos|dominadas/i },
+  MUNECAS: { texto: 'las muñecas', excluir: /flexiones|plancha|fondos|press de banca/i },
+  IMPACTO: { texto: 'saltos e impacto', excluir: /estocadas|sentadilla búlgara|cinta caminadora/i },
+} as const;
+export type ZonaEvitar = keyof typeof ZONAS_EVITAR;
+
+/** Preferencias informadas por el socio, sin datos biométricos ni de salud (RD15). */
 export interface PreferenciasRutina {
   objetivo: string;
   nivel: string;
   diasPorSemana: number;
+  evitar?: ZonaEvitar[];
+}
+
+/** El ejercicio exige una zona que el socio prefiere evitar (se quita del catálogo para la IA). */
+export const exigeZonaEvitada = (nombre: string, evitar: ZonaEvitar[] = []) => evitar.some((z) => ZONAS_EVITAR[z].excluir.test(nombre));
+
+/** Indicación para la IA: preferencia, nunca un diagnóstico. Vacía si no hay zonas. */
+export function indicacionZonasEvitar(evitar: ZonaEvitar[] = []): string {
+  if (!evitar.length) return '';
+  const zonas = evitar.map((z) => ZONAS_EVITAR[z].texto).join(', ');
+  return (
+    `\nEl socio prefiere evitar ejercicios que exijan ${zonas}. Es una preferencia de entrenamiento, no un diagnóstico: ` +
+    'no la interpretes como una lesión ni des indicaciones médicas; solo elegí ejercicios que no carguen esas zonas.'
+  );
 }
 
 /** Ejercicio del catálogo que la IA puede elegir, con su disponibilidad en la sede. */

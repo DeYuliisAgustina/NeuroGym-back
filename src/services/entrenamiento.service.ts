@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma';
-import { ErrorServicioIA, servicioIA, type EjercicioCatalogo, type PreferenciasRutina } from '../integrations/ia';
+import { ErrorServicioIA, exigeZonaEvitada, servicioIA, type EjercicioCatalogo, type PreferenciasRutina } from '../integrations/ia';
 import { rutinaRepository } from '../repositories/rutina.repository';
 import { ErrorApp, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal } from '../utils/fechas';
@@ -53,15 +53,19 @@ export const entrenamientoService = {
 
   /** CU-003: registra las preferencias (CU-003-001) y genera la rutina con IA. */
   async generarRutina(socio: SocioCtx, preferencias: PreferenciasRutina) {
+    // Las zonas a evitar no se guardan: solo se usan en esta generación.
+    const { evitar = [], ...guardadas } = preferencias;
     await prisma.preferenciaRutina.upsert({
       where: { socioId: socio.socioId },
-      create: { socioId: socio.socioId, ...preferencias },
-      update: { ...preferencias, fechaActualizacion: new Date() },
+      create: { socioId: socio.socioId, ...guardadas },
+      update: { ...guardadas, fechaActualizacion: new Date() },
     });
     const lista = await catalogo(socio.sedeId);
+    // Los ejercicios que exigen una zona evitada no se le ofrecen a la IA (garantía, no solo indicación).
+    const paraIA = lista.map(aCatalogoIA).filter((e) => !exigeZonaEvitada(e.nombre, evitar));
     let generada;
     try {
-      generada = await servicioIA.generarRutina(preferencias, lista.map(aCatalogoIA));
+      generada = await servicioIA.generarRutina({ ...guardadas, evitar }, paraIA);
     } catch (error) {
       // CU-003 4.1: si la IA falla, se informa y se conserva la rutina vigente.
       if (error instanceof ErrorServicioIA) throw new ErrorApp(502, 'IA_NO_DISPONIBLE', 'No pudo generarse la rutina. Se conserva tu rutina vigente.');

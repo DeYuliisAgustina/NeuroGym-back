@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { env } from '../../config/env';
 import {
   ErrorServicioIA,
+  indicacionZonasEvitar,
   rutinaGeneradaSchema,
   validarRutinaGenerada,
   varianteSchema,
@@ -32,7 +33,8 @@ export class ServicioIAClaude implements ServicioIA {
       `Objetivo: ${preferencias.objetivo}. Experiencia: ${preferencias.nivel}. Días por semana: ${preferencias.diasPorSemana}.\n` +
       `Armá una rutina con 4 a 7 ejercicios por día, usando días 1 a ${preferencias.diasPorSemana}, ` +
       `orden consecutivo desde 1 en cada día, series, repeticiones, peso sugerido en kg (null si es con peso corporal) y descanso en segundos.\n` +
-      `Catálogo disponible: ${JSON.stringify(disponibles)}`;
+      `Catálogo disponible: ${JSON.stringify(disponibles)}` +
+      indicacionZonasEvitar(preferencias.evitar);
     const respuesta = await this.consultar(pedido, rutinaGeneradaSchema);
     return validarRutinaGenerada(respuesta, preferencias, catalogo);
   }
