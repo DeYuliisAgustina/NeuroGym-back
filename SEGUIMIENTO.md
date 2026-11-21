@@ -410,6 +410,13 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **Solución:** `POST /api/socio/pagos/verificacion` (`CuotaService.verificarPagosPendientes`). Al abrir «Cuotas y pagos», el frontend la llama; el backend consulta a Mercado Pago los pagos únicos PENDIENTES del socio de los últimos 7 días (hasta 3, con 8 s de límite cada uno) y registra el resultado por el mismo camino idempotente (`registrarResultado`, origen CONCILIACION). Si confirma uno, se muestra «Pago registrado».
 - Pruebas: integración (sin resultado no registra; pago ajeno no se toca; aprobado → PAGADA y un comprobante; repetir no duplica). Backend 191, frontend 24.
 
+### WhatsApp del comprobante en la demo: túnel con un clic (2026-11-20)
+
+- Comprobantes de los pagos #79 (socio5) y #80 (socio6) reenviados por WhatsApp con el PDF: **ENTREGADO**. Primer intento del #80: FALLIDO 131047, porque pasaron más de 24 h desde el último mensaje de la autora al número del sandbox (regla de WhatsApp). Se resolvió mandándole «hola».
+- `npm run demo` (`scripts/preparar-demo.mjs`), también como tarea de VS Code **«Preparar demo (WhatsApp)»**: abre un túnel de Pinggy por ssh (gratis, sin cuenta, 60 minutos), guarda la URL en `WHATSAPP_URL_PUBLICA`, reinicia el backend y registra el webhook de estados de 360dialog. Con Ctrl+C se cierra y la URL queda vacía. Probado: túnel abierto, backend accesible por HTTPS y webhook registrado.
+- La tarea «Levantar NeuroGym» ya no se ejecuta sola al abrir la carpeta, para no chocar con Run > «NeuroGym (backend + frontend)».
+- Para la defensa: 1) mandar «hola» al número del sandbox; 2) ejecutar «Preparar demo»; 3) pagar una cuota con un socio habilitado (`WHATSAPP_SOCIOS_PRUEBA`: socio3, socio5 y socio6).
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
