@@ -70,9 +70,6 @@ export const equipamientoController = {
   },
 
   // ---------------- Socio (RF8) ----------------
-  async disponibilidadSede(req: Request, res: Response) {
-    res.json(await equipamientoService.disponibilidadSede(socioDe(req).sedeId));
-  },
   async reportar(req: Request, res: Response) {
     // multipart/form-data: campos de texto + archivos "archivos" (fotos o videos).
     const datos = validar(incidenciaSchema, { equipoId: Number(req.body.equipoId), descripcion: req.body.descripcion });

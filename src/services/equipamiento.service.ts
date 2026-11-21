@@ -133,24 +133,6 @@ export const equipamientoService = {
     return { equipo, incidencias, mantenimientos };
   },
 
-  /** RF8 / CU-003-006: disponibilidad del equipamiento de la sede del socio. */
-  async disponibilidadSede(sedeId: number) {
-    const ahora = new Date();
-    const equipos = await prisma.equipo.findMany({
-      where: { sedeId, estado: { not: 'DADO_DE_BAJA' } },
-      include: { mantenimientos: { where: { estado: 'PROGRAMADO', finProgramado: { gte: ahora } }, orderBy: { inicioProgramado: 'asc' }, take: 1 } },
-      orderBy: { nombre: 'asc' },
-    });
-    return equipos.map((e) => ({
-      id: e.id,
-      nombre: e.nombre,
-      categoria: e.categoria,
-      estado: e.estado,
-      disponible: equipoDisponible(e.estado),
-      mantenimientoHasta: e.mantenimientos[0]?.finProgramado ?? null,
-    }));
-  },
-
   // ---------------- Incidencias (RF8, RF21) ----------------
   async reportarIncidencia(socio: { socioId: number; gimnasioId: number }, datos: { equipoId: number; descripcion: string }, archivos: ArchivoEntrante[]) {
     const equipo = await tenant.equipo(datos.equipoId, socio.gimnasioId);

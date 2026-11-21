@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { env } from '../config/env';
-import { entrenamientoController as ent } from '../controllers/entrenamiento.controller';
+import { rutinaController as ent } from '../controllers/rutina.controller';
 import { equipamientoController as eq } from '../controllers/equipamiento.controller';
 import { marketplaceController as mk } from '../controllers/marketplace.controller';
 import { retencionController as ret } from '../controllers/retencion.controller';
@@ -42,19 +42,11 @@ adminModulosRoutes.put('/beneficios/:id', permiso('RETENCION', 'GESTION'), ret.a
 export const socioModulosRoutes = Router();
 socioModulosRoutes.use(autenticar, soloPerfiles('SOCIO'));
 
-socioModulosRoutes.get('/equipamiento', eq.disponibilidadSede);
 socioModulosRoutes.get('/incidencias', eq.misIncidencias);
 socioModulosRoutes.post('/incidencias', subida.array('archivos', 5), eq.reportar);
 
 socioModulosRoutes.get('/rutina/opciones', ent.opciones);
 socioModulosRoutes.get('/rutina/catalogo', ent.catalogo);
-socioModulosRoutes.get('/rutina', ent.rutina);
-socioModulosRoutes.post('/rutina', ent.generar);
-socioModulosRoutes.put('/rutina/ejercicios/:id', ent.editarEjercicio);
-socioModulosRoutes.get('/rutina/ejercicios/:id/variante', ent.variante);
-socioModulosRoutes.put('/rutina/ejercicios/:id/variante', ent.aplicarVariante);
-socioModulosRoutes.post('/entrenamientos', ent.registrarEntrenamiento);
-socioModulosRoutes.get('/entrenamientos', ent.historial);
 
 socioModulosRoutes.get('/beneficios', ret.misBeneficios);
 socioModulosRoutes.post('/beneficios/:id/canje', ret.canjear);

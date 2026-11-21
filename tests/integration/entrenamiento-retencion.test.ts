@@ -30,29 +30,31 @@ describe('CU-003 rutinas con IA y CU-002 retención', () => {
     it('genera la rutina (servicio de IA simulado), la reemplaza y registra el entrenamiento', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(socio.token);
-      const sinDatos = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia' });
+      const sinDatos = await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Hipertrofia' });
       expect(sinDatos.status).toBe(400);
-      const r = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2 });
+      const r = await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2 });
       expect(r.status).toBe(201);
       expect(r.body.rutina.ejercicios.length).toBeGreaterThan(0);
       expect(r.body.generador).toContain('simulación');
-      await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Resistencia', nivel: 'Principiante', diasPorSemana: 3 });
+      await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Resistencia', nivel: 'Principiante', diasPorSemana: 3 });
       expect(await prisma.rutina.count({ where: { socioId: socio.id, vigente: true } })).toBe(1);
       expect(await prisma.rutina.count({ where: { socioId: socio.id } })).toBe(2);
 
-      const rutina = (await request(app).get('/api/socio/rutina').set(h)).body.rutina;
+      const rutina = (await request(app).get('/api/rutinas/actual').set(h)).body.rutina;
       const delDia1 = rutina.ejercicios.filter((e: { dia: number }) => e.dia === 1);
-      expect((await request(app).post('/api/socio/entrenamientos').set(h).send({ dia: 1, realizados: [] })).body.error).toBe('SIN_EJERCICIOS');
-      const ent = await request(app).post('/api/socio/entrenamientos').set(h).send({ dia: 1, realizados: [delDia1[0].id] });
+      expect((await request(app).post('/api/entrenamientos').set(h).send({ dia: 1, realizados: [] })).body.error).toBe('SIN_EJERCICIOS');
+      const ent = await request(app).post('/api/entrenamientos').set(h).send({ dia: 1, realizados: [delDia1[0].id] });
       expect(ent.body).toMatchObject({ ejerciciosCompletados: 1, ejerciciosTotales: delDia1.length });
     });
 
     it('zonas a evitar: lista cerrada, no se guardan y quitan del catálogo los ejercicios que las exigen', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(socio.token);
-      const invalida = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['TENGO_HERNIA'] });
+      const invalida = await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['TENGO_HERNIA'] });
       expect(invalida.status).toBe(400);
-      const r = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['RODILLAS', 'MUNECAS'] });
+      const preferencias = { objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 2, evitar: ['RODILLAS', 'MUNECAS'] };
+      expect((await request(app).put('/api/socios/preferencias').set(h).send(preferencias)).status).toBe(200);
+      const r = await request(app).post('/api/rutinas').set(h).send(preferencias);
       expect(r.status).toBe(201);
       const nombres: string[] = r.body.rutina.ejercicios.map((e: { nombre: string }) => e.nombre);
       expect(nombres.length).toBeGreaterThan(0);
@@ -66,30 +68,33 @@ describe('CU-003 rutinas con IA y CU-002 retención', () => {
     it('CU-003-003/005: edición con validación de rangos', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(socio.token);
-      const r = await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Movilidad', nivel: 'Avanzado', diasPorSemana: 1 });
+      const r = await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Movilidad', nivel: 'Avanzado', diasPorSemana: 1 });
       const item = r.body.rutina.ejercicios[0];
-      expect((await request(app).put(`/api/socio/rutina/ejercicios/${item.id}`).set(h).send({ series: 50 })).status).toBe(400);
-      const ok = await request(app).put(`/api/socio/rutina/ejercicios/${item.id}`).set(h).send({ series: 5, repeticiones: 8, pesoKg: 40, descansoSeg: 90 });
+      expect((await request(app).put(`/api/ejercicios/${item.id}`).set(h).send({ series: 50 })).status).toBe(400);
+      const ok = await request(app).put(`/api/ejercicios/${item.id}`).set(h).send({ series: 5, repeticiones: 8, pesoKg: 40, descansoSeg: 90 });
       expect(ok.body.rutina.ejercicios.find((e: { id: number }) => e.id === item.id)).toMatchObject({ series: 5, repeticiones: 8, pesoKg: 40, descansoSeg: 90 });
     });
 
     it('RF7 y RD11: equipo fuera de servicio → variante sugerida; aplicarla no modifica la reserva', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(socio.token);
-      await request(app).post('/api/socio/rutina').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 3 });
+      await request(app).post('/api/rutinas').set(h).send({ objetivo: 'Hipertrofia', nivel: 'Intermedio', diasPorSemana: 3 });
       const rutina = await prisma.rutina.findFirstOrThrow({ where: { socioId: socio.id, vigente: true }, include: { ejercicios: true } });
       const prensa = await prisma.ejercicio.findUniqueOrThrow({ where: { nombre: 'Prensa' } });
       const item = await prisma.ejercicioRutina.update({ where: { id: rutina.ejercicios[0].id }, data: { ejercicioId: prensa.id } });
       await prisma.equipo.updateMany({ where: { nombre: 'Prensa 45' }, data: { estado: 'FUERA_DE_SERVICIO' } });
 
-      const vista = await request(app).get('/api/socio/rutina').set(h);
+      // Fig. 94: disponibilidad del equipamiento de la sede del socio.
+      const disponibilidad = await request(app).get('/api/equipos/disponibilidad').set(h);
+      expect(disponibilidad.body.find((e: { nombre: string }) => e.nombre === 'Prensa 45').disponible).toBe(false);
+      const vista = await request(app).get('/api/rutinas/actual').set(h);
       expect(vista.body.rutina.ejercicios.find((e: { id: number }) => e.id === item.id).disponible).toBe(false);
-      const marcado = await request(app).post('/api/socio/entrenamientos').set(h).send({ dia: item.dia, realizados: [item.id] });
+      const marcado = await request(app).post('/api/entrenamientos').set(h).send({ dia: item.dia, realizados: [item.id] });
       expect(marcado.body.mensaje).toBe('Elegí una variante para este equipo.');
 
-      const variante = await request(app).get(`/api/socio/rutina/ejercicios/${item.id}/variante`).set(h);
+      const variante = await request(app).get(`/api/ejercicios/${item.id}/variante`).set(h);
       expect(variante.body.variante.grupoMuscular).toBe('Piernas');
-      const aplicada = await request(app).put(`/api/socio/rutina/ejercicios/${item.id}/variante`).set(h).send({ ejercicioId: variante.body.variante.id });
+      const aplicada = await request(app).put(`/api/ejercicios/${item.id}`).set(h).send({ variante: variante.body.variante.id });
       expect(aplicada.body.mensaje).toBe('Variante aplicada. Tu turno se mantiene.');
       await prisma.equipo.updateMany({ where: { nombre: 'Prensa 45' }, data: { estado: 'OPERATIVO' } });
     });

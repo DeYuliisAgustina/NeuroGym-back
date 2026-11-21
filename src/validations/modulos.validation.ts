@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { emailSchema, passwordSchema } from './auth.validation';
 import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, textoSchema } from './comunes.validation';
-import { NIVELES, OBJETIVOS } from '../services/entrenamiento.service';
+import { NIVELES, OBJETIVOS } from '../services/rutina.service';
 
 // ---------------- Equipamiento ----------------
 export const equipoSchema = z.object({
@@ -61,7 +61,8 @@ export const edicionEjercicioSchema = z.object({
   pesoKg: z.number().min(0).max(500).nullable().optional(),
   descansoSeg: z.number().int().min(0).max(600).nullable().optional(),
 });
-export const aplicarVarianteSchema = z.object({ ejercicioId: idSchema });
+/** PUT /api/ejercicios/{id} { variante } — CU-003-008. */
+export const aplicarVarianteSchema = z.object({ variante: idSchema });
 export const entrenamientoSchema = z.object({ dia: z.number().int().min(1).max(7), realizados: z.array(idSchema).max(30) });
 
 // ---------------- Retención (CU-002) ----------------

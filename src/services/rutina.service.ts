@@ -1,9 +1,10 @@
-import { prisma } from '../config/prisma';
 import { ErrorServicioIA, exigeZonaEvitada, servicioIA, type EjercicioCatalogo, type PreferenciasRutina } from '../integrations/ia';
+import { equipamientoRepository } from '../repositories/equipamiento.repository';
 import { rutinaRepository } from '../repositories/rutina.repository';
+import { aNumero } from '../utils/dinero';
 import { ErrorApp, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal } from '../utils/fechas';
-import { aNumero } from '../utils/dinero';
+import { equipoDisponible } from './equipamiento.service';
 
 type SocioCtx = { socioId: number; sedeId: number };
 
@@ -16,12 +17,7 @@ export const NIVELES = ['Principiante', 'Intermedio', 'Avanzado'] as const;
  * registra el gimnasio; el sistema no detecta fallas (RD11).
  */
 async function catalogo(sedeId: number) {
-  const ahora = new Date();
-  const lista = await rutinaRepository.catalogoConEquipos(sedeId);
-  const mantenimientos = await prisma.mantenimiento.findMany({
-    where: { estado: 'PROGRAMADO', finProgramado: { gte: ahora }, equipo: { sedeId } },
-    select: { equipoId: true, finProgramado: true },
-  });
+  const [lista, mantenimientos] = await Promise.all([rutinaRepository.catalogoConEquipos(sedeId), equipamientoRepository.buscarMantenimientosProgramados(sedeId)]);
   return lista.map((e) => {
     const disponible = e.equipos.length === 0 || e.equipos.some((eq) => eq.estado === 'OPERATIVO');
     const hasta = mantenimientos.filter((m) => e.equipos.some((eq) => eq.id === m.equipoId)).map((m) => m.finProgramado);
@@ -43,33 +39,37 @@ const aCatalogoIA = (e: { id: number; nombre: string; grupoMuscular: string; dis
   disponible: e.disponible,
 });
 
-/** Rutinas personalizadas con IA y registro de entrenamientos (CU-003, RF5, RF6, RF7). */
-export const entrenamientoService = {
+/**
+ * RutinaService: rutinas personalizadas con IA y registro de entrenamientos
+ * (CU-003, RF5, RF6, RF7). Las operaciones son las de los diagramas de secuencia
+ * (Figuras 88 a 97).
+ */
+export const rutinaService = {
   catalogo: (sedeId: number) => catalogo(sedeId),
 
   preferencias(socioId: number) {
-    return prisma.preferenciaRutina.findUnique({ where: { socioId } });
+    return rutinaRepository.buscarPreferencias(socioId);
   },
 
-  /** CU-003: registra las preferencias (CU-003-001) y genera la rutina con IA. */
+  /** CU-003-001: registra el objetivo, la experiencia y los días por semana. Las zonas a evitar no se guardan. */
+  registrarPreferencias(socio: SocioCtx, datos: PreferenciasRutina) {
+    const { evitar: _evitar, ...guardadas } = datos;
+    return rutinaRepository.guardarPreferencias(socio.socioId, guardadas);
+  },
+
+  /** CU-003: genera la rutina con IA a partir de las preferencias y la asigna (reemplaza a la vigente). */
   async generarRutina(socio: SocioCtx, preferencias: PreferenciasRutina) {
-    // Las zonas a evitar no se guardan: solo se usan en esta generación.
-    const { evitar = [], ...guardadas } = preferencias;
-    await prisma.preferenciaRutina.upsert({
-      where: { socioId: socio.socioId },
-      create: { socioId: socio.socioId, ...guardadas },
-      update: { ...guardadas, fechaActualizacion: new Date() },
-    });
+    const { evitar = [], ...datos } = preferencias;
     const lista = await catalogo(socio.sedeId);
     // Los ejercicios que exigen una zona evitada no se le ofrecen a la IA (garantía, no solo indicación).
     const paraIA = lista.map(aCatalogoIA).filter((e) => !exigeZonaEvitada(e.nombre, evitar));
     let generada;
     try {
-      generada = await servicioIA.generarRutina({ ...guardadas, evitar }, paraIA);
+      generada = await servicioIA.generarRutina({ ...datos, evitar }, paraIA);
     } catch (error) {
       // CU-003 4.1: si la IA falla, se informa y se conserva la rutina vigente (si la hay).
       if (error instanceof ErrorServicioIA) {
-        const tieneRutina = (await rutinaRepository.rutinaVigente(socio.socioId)) !== null;
+        const tieneRutina = (await rutinaRepository.buscarRutinaVigente(socio.socioId)) !== null;
         throw new ErrorApp(
           502,
           'IA_NO_DISPONIBLE',
@@ -78,15 +78,15 @@ export const entrenamientoService = {
       }
       throw error;
     }
-    await rutinaRepository.reemplazarRutina(socio.socioId, generada);
-    return this.rutinaActual(socio);
+    await rutinaRepository.asignarRutina(socio.socioId, generada);
+    return this.obtenerRutina(socio);
   },
 
   /** CU-003-002: rutina vigente con la disponibilidad del equipamiento de cada ejercicio. */
-  async rutinaActual(socio: SocioCtx) {
+  async obtenerRutina(socio: SocioCtx) {
     const [rutina, preferencias, lista] = await Promise.all([
-      rutinaRepository.rutinaVigente(socio.socioId),
-      prisma.preferenciaRutina.findUnique({ where: { socioId: socio.socioId } }),
+      rutinaRepository.buscarRutinaVigente(socio.socioId),
+      rutinaRepository.buscarPreferencias(socio.socioId),
       catalogo(socio.sedeId),
     ]);
     if (!rutina) return { rutina: null, preferencias, generador: servicioIA.descripcion };
@@ -119,8 +119,21 @@ export const entrenamientoService = {
     };
   },
 
+  /** CU-003-006 (RF8): disponibilidad del equipamiento de la sede del socio, con la fecha prevista si está en mantenimiento. */
+  async obtenerDisponibilidad(sedeId: number) {
+    const equipos = await equipamientoRepository.buscarDisponibilidad(sedeId);
+    return equipos.map((e) => ({
+      id: e.id,
+      nombre: e.nombre,
+      categoria: e.categoria,
+      estado: e.estado,
+      disponible: equipoDisponible(e.estado),
+      mantenimientoHasta: e.mantenimientos[0]?.finProgramado ?? null,
+    }));
+  },
+
   /** CU-003-003/004/005: edición manual; el reemplazo manual no consulta a la IA. */
-  async editarEjercicio(
+  async actualizarEjercicio(
     socio: SocioCtx,
     ejercicioRutinaId: number,
     datos: { ejercicioId?: number; nombreEjercicio?: string; series?: number; repeticiones?: number; pesoKg?: number | null; descansoSeg?: number | null },
@@ -129,33 +142,28 @@ export const entrenamientoService = {
     if (!item) throw noEncontrado('Ejercicio de la rutina');
     let ejercicioId = datos.ejercicioId;
     if (!ejercicioId && datos.nombreEjercicio && datos.nombreEjercicio.trim().toLowerCase() !== item.ejercicio.nombre.toLowerCase()) {
-      const nombre = datos.nombreEjercicio.trim();
-      const existente = await prisma.ejercicio.findFirst({ where: { nombre: { equals: nombre, mode: 'insensitive' } } });
       // Un ejercicio nuevo del socio conserva el grupo muscular del reemplazado.
-      ejercicioId = (existente ?? (await prisma.ejercicio.create({ data: { nombre, grupoMuscular: item.ejercicio.grupoMuscular } }))).id;
+      ejercicioId = (await rutinaRepository.buscarOCrearEjercicio(datos.nombreEjercicio.trim(), item.ejercicio.grupoMuscular)).id;
     }
-    if (ejercicioId && !(await prisma.ejercicio.findUnique({ where: { id: ejercicioId } }))) throw noEncontrado('Ejercicio');
-    await prisma.ejercicioRutina.update({
-      where: { id: ejercicioRutinaId },
-      data: {
-        ejercicioId,
-        series: datos.series,
-        repeticiones: datos.repeticiones,
-        pesoKg: datos.pesoKg,
-        descansoSeg: datos.descansoSeg,
-      },
+    if (ejercicioId && !(await rutinaRepository.buscarEjercicio(ejercicioId))) throw noEncontrado('Ejercicio');
+    await rutinaRepository.guardarRutina(ejercicioRutinaId, {
+      ejercicioId,
+      series: datos.series,
+      repeticiones: datos.repeticiones,
+      pesoKg: datos.pesoKg,
+      descansoSeg: datos.descansoSeg,
     });
-    return this.rutinaActual(socio);
+    return this.obtenerRutina(socio);
   },
 
   /** CU-003-007: variante sugerida por IA para un ejercicio con equipo no disponible. */
-  async verVariante(socio: SocioCtx, ejercicioRutinaId: number) {
+  async sugerirVariante(socio: SocioCtx, ejercicioRutinaId: number) {
     const item = await rutinaRepository.itemDeRutinaVigente(socio.socioId, ejercicioRutinaId);
     if (!item) throw noEncontrado('Ejercicio de la rutina');
     const lista = await catalogo(socio.sedeId);
     const actual = lista.find((e) => e.id === item.ejercicioId)!;
     if (actual.disponible) throw reglaNegocio('EQUIPO_DISPONIBLE', 'El equipo de este ejercicio está disponible');
-    const preferencias = await prisma.preferenciaRutina.findUnique({ where: { socioId: socio.socioId } });
+    const preferencias = await rutinaRepository.buscarPreferencias(socio.socioId);
     let sugerencia;
     try {
       sugerencia = await servicioIA.sugerirVariante(aCatalogoIA(actual), preferencias?.objetivo ?? 'General', lista.map(aCatalogoIA));
@@ -163,7 +171,7 @@ export const entrenamientoService = {
       if (error instanceof ErrorServicioIA) throw new ErrorApp(502, 'IA_NO_DISPONIBLE', 'No pudo obtenerse una variante. Tu rutina no cambió.');
       throw error;
     }
-    const variante = sugerencia.ejercicioId ? lista.find((e) => e.id === sugerencia.ejercicioId) ?? null : null;
+    const variante = sugerencia.ejercicioId ? (lista.find((e) => e.id === sugerencia.ejercicioId) ?? null) : null;
     return { actual, variante, fundamento: sugerencia.fundamento };
   },
 
@@ -174,13 +182,13 @@ export const entrenamientoService = {
     const variante = (await catalogo(socio.sedeId)).find((e) => e.id === ejercicioId);
     if (!variante) throw noEncontrado('Ejercicio');
     if (!variante.disponible) throw reglaNegocio('VARIANTE_NO_DISPONIBLE', 'La variante elegida tampoco está disponible');
-    await prisma.ejercicioRutina.update({ where: { id: ejercicioRutinaId }, data: { ejercicioId } });
-    return { mensaje: 'Variante aplicada. Tu turno se mantiene.', rutina: await this.rutinaActual(socio) };
+    await rutinaRepository.reemplazarEjercicio(ejercicioRutinaId, ejercicioId);
+    return { mensaje: 'Variante aplicada. Tu turno se mantiene.', rutina: await this.obtenerRutina(socio) };
   },
 
   /** CU-003-009: registro de ejercicios realizados; no reemplaza la asistencia. */
   async registrarEntrenamiento(socio: SocioCtx, datos: { dia: number; realizados: number[] }) {
-    const rutina = await rutinaRepository.rutinaVigente(socio.socioId);
+    const rutina = await rutinaRepository.buscarRutinaVigente(socio.socioId);
     if (!rutina) throw reglaNegocio('SIN_RUTINA', 'No tenés una rutina generada');
     const delDia = rutina.ejercicios.filter((e) => e.dia === datos.dia);
     if (delDia.length === 0) throw reglaNegocio('DIA_INVALIDO', 'La rutina no tiene ejercicios para ese día');
@@ -193,12 +201,15 @@ export const entrenamientoService = {
     if (delDia.some((e) => realizados.includes(e.id) && disponibilidad.get(e.ejercicioId) === false)) {
       throw reglaNegocio('EQUIPO_NO_DISPONIBLE', 'Elegí una variante para este equipo.');
     }
-    return prisma.entrenamiento.create({
-      data: { rutinaId: rutina.id, fecha: aFechaDb(ahoraLocal().fecha), ejerciciosCompletados: realizados.length, ejerciciosTotales: delDia.length },
+    return rutinaRepository.guardarEntrenamiento({
+      rutinaId: rutina.id,
+      fecha: aFechaDb(ahoraLocal().fecha),
+      ejerciciosCompletados: realizados.length,
+      ejerciciosTotales: delDia.length,
     });
   },
 
   historial(socioId: number) {
-    return prisma.entrenamiento.findMany({ where: { rutina: { socioId } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 60 });
+    return rutinaRepository.buscarEntrenamientos(socioId);
   },
 };
