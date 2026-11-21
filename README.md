@@ -101,7 +101,7 @@ npm run db:seed             # datos ficticios de demostración
 npm run dev                 # http://localhost:3000/api
 ```
 
-Las cuentas de demostración del seed usan la contraseña definida en `SEED_PASSWORD` (ver `prisma/seed.ts`). Correos: `admin@piloto.demo`, `recepcion@piloto.demo`, `cobranzas@piloto.demo`, `mantenimiento@piloto.demo`, `analista@piloto.demo`, `socio1@piloto.demo`… y `nutri1@profesional.demo`.
+Las cuentas de demostración del seed usan la contraseña `neurogym123` (o la definida en `SEED_PASSWORD`). Correos del gimnasio piloto: `admin@neurogym.test`, `recepcion@neurogym.test`, `cobranzas@neurogym.test`, `mantenimiento@neurogym.test`, `analista@neurogym.test`, socios `socio1@neurogym.test` a `socio28@neurogym.test` y profesionales `nutri1@neurogym.test`, `nutri2@neurogym.test` y `deporte1@neurogym.test`. El segundo gimnasio usa `@otrogym.test` (`admin@otrogym.test`, socios 29 a 36).
 
 ## Variables de entorno
 

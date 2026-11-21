@@ -391,6 +391,12 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **WhatsApp con Meta: descartado a pedido de la autora.** Se probó el número de prueba de Meta: con la información del negocio y una tarjeta cargadas, la API acepta los envíos, pero Meta no los entrega (error 131031 «Business Account locked») porque el portfolio no pasó la verificación del negocio (141010), que exige documentación de un negocio real. Se abrió un caso en el soporte de Meta. La autora decidió seguir con el **sandbox de 360dialog**; se quitaron las plantillas de Meta del código. El adaptador `WhatsAppCloudApi` anterior queda sin cambios.
 - **Pruebas:** recordatorio (una sola vez y sin los cancelados) y redirección.
 
+### Cuentas de demostración más fáciles de recordar (2026-11-20)
+
+- A pedido de la autora, los correos del seed pasan de `@piloto.demo` y `@profesional.demo` a **`@neurogym.test`**, y los del segundo gimnasio de `@otro.demo` a **`@otrogym.test`** (`.test` es un dominio reservado que no existe en internet). La contraseña de todas pasa a **`neurogym123`** (`SEED_PASSWORD` en `.env`).
+- Se actualizaron en el lugar las 49 cuentas de la base de desarrollo (correo y contraseña), sin borrar ni regenerar datos: pagos, rutinas y turnos quedan igual. `prisma/seed.ts` crea los mismos correos. `WHATSAPP_SOCIOS_PRUEBA` pasa a `socio3@neurogym.test`.
+- Verificado contra el backend en ejecución: ingresan socio1, socio3, admin de ambos gimnasios, nutri1 y socio29; el correo anterior responde 401.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**

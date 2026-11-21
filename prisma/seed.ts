@@ -16,7 +16,7 @@ import { aFechaDb, aHoraDb, ahoraLocal, diaSemanaIso, sumarDias } from '../src/u
 import { generarCodigoQr } from '../src/utils/codigoQr';
 
 const prisma = new PrismaClient();
-const PASSWORD_DEMO = process.env.SEED_PASSWORD ?? 'NeuroGymDemo2026';
+const PASSWORD_DEMO = process.env.SEED_PASSWORD ?? 'neurogym123';
 
 // Generador pseudoaleatorio determinístico: el seed produce siempre los mismos datos.
 let semilla = 20261116;
@@ -201,7 +201,7 @@ async function main() {
     razonSocial: 'Gimnasio Piloto Demo S.A.',
     cuit: '30-00000000-1',
     tipo: 'INTELLIGENCE',
-    dominio: 'piloto.demo',
+    dominio: 'neurogym.test',
     sedes: [
       { nombre: 'Sede Centro', direccion: 'Calle Ficticia 100, Rosario', horarios: 'Lun a vie 7 a 23 h; sáb 9 a 18 h' },
       { nombre: 'Sede Norte', direccion: 'Avenida Ejemplo 2500, Rosario', horarios: 'Lun a vie 8 a 22 h' },
@@ -212,7 +212,7 @@ async function main() {
     razonSocial: 'Otro Gimnasio Demo S.R.L.',
     cuit: '30-00000000-2',
     tipo: 'STANDARD',
-    dominio: 'otro.demo',
+    dominio: 'otrogym.test',
     sedes: [{ nombre: 'Sede Única', direccion: 'Pasaje Prueba 50, Rosario', horarios: 'Lun a sáb 8 a 22 h' }],
     precios: { BASICO: 28000, PREMIUM: 10000 },
   });
@@ -274,7 +274,7 @@ async function main() {
           consentimientoDatos: true,
           usuario: {
             create: {
-              email: `socio${n}@${gimnasio.id === piloto.gimnasio.id ? 'piloto.demo' : 'otro.demo'}`,
+              email: `socio${n}@${gimnasio.id === piloto.gimnasio.id ? 'neurogym.test' : 'otrogym.test'}`,
               passwordHash: hash,
               nombre: elegir(NOMBRES),
               apellido: `${elegir(APELLIDOS)} ${n}`,
@@ -375,9 +375,9 @@ async function main() {
   const hashProf = await bcrypt.hash(PASSWORD_DEMO, 10);
   const planes = await prisma.planMarketplace.findMany();
   const profesionales = [
-    { email: 'nutri1@profesional.demo', nombre: 'Laura', apellido: 'Nutrición Demo', especialidad: 'NUTRICION' as const, plan: 'PROFESIONAL', exentas: 5, modalidad: 'ONLINE_Y_PRESENCIAL' as const },
-    { email: 'nutri2@profesional.demo', nombre: 'Diego', apellido: 'Alimentación Demo', especialidad: 'NUTRICION' as const, plan: 'BASICO', exentas: 0, modalidad: 'ONLINE' as const },
-    { email: 'deporte1@profesional.demo', nombre: 'Paula', apellido: 'Deportología Demo', especialidad: 'DEPORTOLOGIA' as const, plan: 'BASICO', exentas: 5, modalidad: 'PRESENCIAL' as const },
+    { email: 'nutri1@neurogym.test', nombre: 'Laura', apellido: 'Nutrición Demo', especialidad: 'NUTRICION' as const, plan: 'PROFESIONAL', exentas: 5, modalidad: 'ONLINE_Y_PRESENCIAL' as const },
+    { email: 'nutri2@neurogym.test', nombre: 'Diego', apellido: 'Alimentación Demo', especialidad: 'NUTRICION' as const, plan: 'BASICO', exentas: 0, modalidad: 'ONLINE' as const },
+    { email: 'deporte1@neurogym.test', nombre: 'Paula', apellido: 'Deportología Demo', especialidad: 'DEPORTOLOGIA' as const, plan: 'BASICO', exentas: 5, modalidad: 'PRESENCIAL' as const },
   ];
   for (const [k, p] of profesionales.entries()) {
     await prisma.profesional.create({
