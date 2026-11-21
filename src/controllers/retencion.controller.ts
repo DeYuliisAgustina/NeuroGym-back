@@ -5,58 +5,45 @@ import { beneficioService } from '../services/beneficio.service';
 import { retencionService } from '../services/retencion.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { idParam, validar } from '../utils/validar';
-import { fechaSchema, idSchema } from '../validations/comunes.validation';
-import { beneficioSchema, decisionSchema, filtroRetencionSchema, propuestaSchema } from '../validations/modulos.validation';
+import { beneficioSchema, filtroRetencionSchema, propuestaSchema } from '../validations/modulos.validation';
 
-const filtroIntelligence = z.object({ sedeId: idSchema.optional(), desde: fechaSchema.optional(), hasta: fechaSchema.optional() });
-
-/** Constancia y regreso (CU-002), NeuroGym Intelligence y beneficios por constancia. */
+/**
+ * RetencionController: constancia y regreso (CU-002), como en los diagramas de
+ * secuencia (Figuras 78 a 82 y 87), y beneficios por constancia.
+ */
 export const retencionController = {
-  async dashboard(req: Request, res: Response) {
-    res.json(await retencionService.dashboard(personalDe(req).gimnasioId, validar(filtroRetencionSchema, req.query)));
+  /** GET /api/indicadores?filtros — CU-002-001 y CU-002-002. */
+  async obtenerIndicadores(req: Request, res: Response) {
+    res.json(await retencionService.obtenerIndicadores(personalDe(req).gimnasioId, validar(filtroRetencionSchema, req.query)));
   },
-  async senales(req: Request, res: Response) {
-    res.json(await retencionService.senales(personalDe(req).gimnasioId, validar(filtroRetencionSchema, req.query)));
+  /** GET /api/senales — CU-002-003. */
+  async obtenerSenales(req: Request, res: Response) {
+    res.json(await retencionService.obtenerSenales(personalDe(req).gimnasioId, validar(filtroRetencionSchema, req.query)));
   },
-  async detalleSocio(req: Request, res: Response) {
-    res.json(await retencionService.detalleSocio(idParam(req.params.id), personalDe(req).gimnasioId));
+  /** GET /api/socios/{id}/asistencia — CU-002-003. */
+  async obtenerAsistenciaReciente(req: Request, res: Response) {
+    res.json(await retencionService.obtenerAsistenciaReciente(idParam(req.params.id), personalDe(req).gimnasioId));
   },
-  async crearPropuesta(req: Request, res: Response) {
-    res.status(201).json(await retencionService.crearPropuesta(personalDe(req), validar(propuestaSchema, req.body)));
+  /** POST /api/propuestas — CU-002-004 y CU-002-010. */
+  async registrarPropuesta(req: Request, res: Response) {
+    res.status(201).json(await retencionService.registrarPropuesta(personalDe(req), validar(propuestaSchema, req.body)));
   },
+  /** GET /api/propuestas — «Propuestas de incentivo». */
   async listarPropuestas(req: Request, res: Response) {
     const { estado } = validar(z.object({ estado: z.enum(['PREPARADA', 'PENDIENTE', 'APROBADA']).optional() }), req.query);
     res.json(await retencionService.listarPropuestas(personalDe(req).gimnasioId, estado));
   },
+  /** POST /api/propuestas/{id}/aprobacion — CU-002-005 y CU-002-010. */
   async aprobarPropuesta(req: Request, res: Response) {
     res.json(await retencionService.aprobarPropuesta(idParam(req.params.id), personalDe(req)));
   },
+  /** PATCH /api/propuestas/{id}/pendiente — CU-002-004 5.1. */
   async posponerPropuesta(req: Request, res: Response) {
     res.json(await retencionService.posponerPropuesta(idParam(req.params.id), personalDe(req)));
   },
   /** Ejecución manual del ETL para el gimnasio (además de la tarea nocturna). */
   async ejecutarEtl(req: Request, res: Response) {
     res.json(await procesoEtl.ejecutar(personalDe(req).gimnasioId));
-  },
-
-  // ---------------- NeuroGym Intelligence ----------------
-  async analitica(req: Request, res: Response) {
-    res.json(await retencionService.analitica(personalDe(req).gimnasioId, validar(filtroIntelligence, req.query)));
-  },
-  async riesgos(req: Request, res: Response) {
-    const yo = personalDe(req);
-    await retencionService.exigirIntelligence(yo.gimnasioId);
-    const { sedeId } = validar(filtroIntelligence, req.query);
-    res.json(await retencionService.riesgos(yo.gimnasioId, sedeId));
-  },
-  async decision(req: Request, res: Response) {
-    res.status(201).json(await retencionService.registrarDecision(idParam(req.params.id), personalDe(req), validar(decisionSchema, req.body)));
-  },
-  async exportar(req: Request, res: Response) {
-    const archivo = await retencionService.exportar(personalDe(req).gimnasioId, validar(filtroIntelligence, req.query));
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="reporte-retencion-neurogym.xlsx"');
-    res.send(archivo);
   },
 
   // ---------------- Beneficios ----------------

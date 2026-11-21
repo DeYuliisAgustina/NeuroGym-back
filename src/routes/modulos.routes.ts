@@ -31,24 +31,12 @@ adminModulosRoutes.get('/mantenimientos', permiso('EQUIPAMIENTO', 'CONSULTA'), e
 adminModulosRoutes.post('/mantenimientos', permiso('EQUIPAMIENTO', 'GESTION'), eq.programarMantenimiento);
 adminModulosRoutes.patch('/mantenimientos/:id/realizado', permiso('EQUIPAMIENTO', 'GESTION'), eq.mantenimientoRealizado);
 
-// Constancia y regreso (CU-002): consulta para ver, gestión para proponer y aprobar (4.3).
-adminModulosRoutes.get('/retencion/dashboard', permiso('RETENCION', 'CONSULTA'), ret.dashboard);
-adminModulosRoutes.get('/retencion/senales', permiso('RETENCION', 'CONSULTA'), ret.senales);
-adminModulosRoutes.get('/retencion/socios/:id', permiso('RETENCION', 'CONSULTA'), ret.detalleSocio);
-adminModulosRoutes.get('/retencion/propuestas', permiso('RETENCION', 'CONSULTA'), ret.listarPropuestas);
-adminModulosRoutes.post('/retencion/propuestas', permiso('RETENCION', 'GESTION'), ret.crearPropuesta);
-adminModulosRoutes.patch('/retencion/propuestas/:id/aprobacion', permiso('RETENCION', 'GESTION'), ret.aprobarPropuesta);
-adminModulosRoutes.patch('/retencion/propuestas/:id/pendiente', permiso('RETENCION', 'GESTION'), ret.posponerPropuesta);
+// Constancia y regreso (CU-002): ETL manual y beneficios. Las rutas de los diagramas de secuencia están en retencion.routes.ts.
 adminModulosRoutes.post('/retencion/etl', permiso('RETENCION', 'GESTION'), ret.ejecutarEtl);
 adminModulosRoutes.get('/beneficios', permiso('RETENCION', 'CONSULTA'), ret.listarBeneficios);
 adminModulosRoutes.post('/beneficios', permiso('RETENCION', 'GESTION'), ret.crearBeneficio);
 adminModulosRoutes.put('/beneficios/:id', permiso('RETENCION', 'GESTION'), ret.actualizarBeneficio);
 
-// NeuroGym Intelligence (RD3: además, el servicio exige la suscripción INTELLIGENCE)
-adminModulosRoutes.get('/intelligence/analitica', permiso('INTELLIGENCE', 'CONSULTA'), ret.analitica);
-adminModulosRoutes.get('/intelligence/riesgos', permiso('INTELLIGENCE', 'CONSULTA'), ret.riesgos);
-adminModulosRoutes.post('/intelligence/estimaciones/:id/decision', permiso('INTELLIGENCE', 'CONSULTA'), permiso('RETENCION', 'GESTION'), ret.decision);
-adminModulosRoutes.get('/intelligence/reporte.xlsx', permiso('INTELLIGENCE', 'CONSULTA'), ret.exportar);
 
 // ---------------- Socio ----------------
 export const socioModulosRoutes = Router();

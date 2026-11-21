@@ -83,6 +83,7 @@ export const propuestaSchema = z.object({
   premiumPorcentaje: z.number().min(1).max(100).optional(),
 });
 export const decisionSchema = z.object({
+  estimacionId: idSchema,
   decision: z.enum(['MANTENER_EN_OBSERVACION', 'PREPARAR_PROPUESTA']),
   motivo: textoSchema(255),
   incentivo: z.string().trim().max(100).optional(),

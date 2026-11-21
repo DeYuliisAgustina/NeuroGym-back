@@ -4,6 +4,7 @@ import { authRoutes } from './auth.routes';
 import { adminModulosRoutes, profesionalRoutes, publicoRoutes, socioModulosRoutes, turnosProfesionalesRoutes } from './modulos.routes';
 import { notificacionRoutes } from './notificacion.routes';
 import { operacionRoutes } from './operacion.routes';
+import { retencionRoutes } from './retencion.routes';
 import { socioRoutes } from './socio.routes';
 import { whatsappRoutes } from './whatsapp.routes';
 
@@ -18,4 +19,5 @@ apiRoutes.use('/profesional', profesionalRoutes);
 apiRoutes.use('/turnos-profesionales', turnosProfesionalesRoutes);
 apiRoutes.use('/notificaciones', notificacionRoutes);
 apiRoutes.use('/whatsapp', whatsappRoutes);
+apiRoutes.use('/', retencionRoutes);
 apiRoutes.use('/', operacionRoutes);

@@ -136,11 +136,11 @@ describe('CU-003 rutinas con IA y CU-002 retención', () => {
     it('RD10: la propuesta no se comunica hasta su aprobación; al aprobarse se notifica y bonifica Premium', async () => {
       const socio = await crearSocio(g.sedeA.id);
       const h = conToken(g.admin.token);
-      const propuesta = await request(app).post('/api/admin/retencion/propuestas').set(h).send({ socioId: socio.id, incentivo: '7 días de Premium bonificado', mensaje: 'Te esperamos', premiumDias: 7 });
+      const propuesta = await request(app).post('/api/propuestas').set(h).send({ socioId: socio.id, incentivo: '7 días de Premium bonificado', mensaje: 'Te esperamos', premiumDias: 7 });
       expect(propuesta.body.estado).toBe('PENDIENTE');
       expect(await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId, tipo: { in: ['INCENTIVO', 'BENEFICIO'] } } })).toBe(0);
       expect((await request(app).get('/api/socio/perfil').set(conToken(socio.token))).body.esPremium).toBe(false);
-      const aprobada = await request(app).patch(`/api/admin/retencion/propuestas/${propuesta.body.id}/aprobacion`).set(h);
+      const aprobada = await request(app).post(`/api/propuestas/${propuesta.body.id}/aprobacion`).set(h);
       expect(aprobada.body.bonificacion).not.toBeNull();
       expect(await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId, tipo: 'BENEFICIO' } })).toBe(1);
       expect((await request(app).get('/api/socio/perfil').set(conToken(socio.token))).body.esPremium).toBe(true);
@@ -149,21 +149,45 @@ describe('CU-003 rutinas con IA y CU-002 retención', () => {
     it('CU-002 4.3: un rol de consulta ve los indicadores pero no registra propuestas', async () => {
       const analista = await crearPersonal(g.gimnasio.id, (await crearRol(g.gimnasio.id, 'Analista', [['RETENCION', 'CONSULTA'], ['INTELLIGENCE', 'CONSULTA']])).id, 'analista');
       const h = conToken(analista.token);
-      expect((await request(app).get('/api/admin/retencion/dashboard').set(h)).status).toBe(200);
-      expect((await request(app).post('/api/admin/retencion/propuestas').set(h).send({})).status).toBe(403);
-      expect((await request(app).get('/api/admin/intelligence/analitica').set(h)).status).toBe(200);
+      expect((await request(app).get('/api/indicadores').set(h)).status).toBe(200);
+      expect((await request(app).post('/api/propuestas').set(h).send({})).status).toBe(403);
+      expect((await request(app).get('/api/analitica').set(h)).status).toBe(200);
     });
 
     it('RD3: la analítica avanzada es exclusiva de Intelligence', async () => {
       const standard = await crearGimnasio('STANDARD');
-      const r = await request(app).get('/api/admin/intelligence/analitica').set(conToken(standard.admin.token));
+      const r = await request(app).get('/api/analitica').set(conToken(standard.admin.token));
       expect(r.status).toBe(403);
       expect(r.body.error).toBe('REQUIERE_INTELLIGENCE');
-      expect((await request(app).get('/api/admin/retencion/dashboard').set(conToken(standard.admin.token))).status).toBe(200);
+      expect((await request(app).get('/api/indicadores').set(conToken(standard.admin.token))).status).toBe(200);
+    });
+
+    it('Figs. 80, 84 y 85: señales, asistencia reciente, análisis del socio y decisión con los nombres de las secuencias', async () => {
+      const socio = await socioAusente();
+      await procesoEtl.ejecutar(g.gimnasio.id);
+      const h = conToken(g.admin.token);
+      const senales = await request(app).get('/api/senales').set(h);
+      expect(senales.body.some((s: { socioId: number }) => s.socioId === socio.id)).toBe(true);
+      const asistencia = await request(app).get(`/api/socios/${socio.id}/asistencia`).set(h);
+      expect(asistencia.body.semanas).toHaveLength(12);
+      const analisis = await request(app).get(`/api/analitica/socios/${socio.id}`).set(h);
+      expect(analisis.body.estimacion.nivel).toBe('ALTO');
+      const decision = await request(app)
+        .post('/api/decisiones')
+        .set(h)
+        .send({ estimacionId: analisis.body.estimacion.id, decision: 'MANTENER_EN_OBSERVACION', motivo: 'Avisó que vuelve el mes próximo' });
+      expect(decision.status).toBe(201);
+      expect(decision.body.propuesta).toBeNull();
+      // Una propuesta sin Premium se aprueba con aprobarPropuesta y se comunica como INCENTIVO.
+      const propuesta = await request(app).post('/api/propuestas').set(h).send({ socioId: socio.id, incentivo: 'Clase de regreso', mensaje: 'Te esperamos' });
+      expect(propuesta.body.estado).toBe('PREPARADA');
+      const aprobada = await request(app).post(`/api/propuestas/${propuesta.body.id}/aprobacion`).set(h);
+      expect(aprobada.body.bonificacion).toBeNull();
+      expect(await prisma.notificacion.count({ where: { usuarioId: socio.usuarioId, tipo: 'INCENTIVO' } })).toBe(1);
     });
 
     it('CU-002-009: exporta el reporte .xlsx', async () => {
-      const r = await request(app).get('/api/admin/intelligence/reporte.xlsx').set(conToken(g.admin.token)).buffer(true);
+      const r = await request(app).get('/api/analitica/reporte').set(conToken(g.admin.token)).buffer(true);
       expect(r.status).toBe(200);
       expect(r.headers['content-type']).toContain('spreadsheetml');
     });
