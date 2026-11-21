@@ -422,6 +422,16 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - A pedido de la autora, que usa únicamente Gemini, se quitó el proveedor Claude: `ServicioIAClaude`, la dependencia `@anthropic-ai/sdk` y las variables `ANTHROPIC_API_KEY` e `IA_MODELO`. Quedan `ServicioIAGemini` (con clave) y `ServicioIASimulado` (sin clave y en las pruebas). `IA_PROVEEDOR=simulado` sigue forzando la simulación.
 - Verificado: backend 191 pruebas, frontend 24; rutina real con Gemini (17 ejercicios, 11 s). El diagrama de clases (10.5.7) se actualizó para mostrar solo las dos implementaciones.
 
+### Autorregistro del socio con alta del gimnasio (2026-11-21)
+
+- A pedido de la autora, el socio se registra solo desde «Registrarse» (perfil Socio): nombre, apellido, correo, contraseña propia, teléfono, gimnasio y sede, y consentimiento. Es un **pre-registro** (la pantalla no lo llama así): la cuenta queda inactiva con `socio.pendiente_alta = true`, con Plan Básico y sin cuota.
+- El ingreso responde `403 ALTA_PENDIENTE` («Tu registro está pendiente…») hasta que el personal con `SOCIOS:GESTION` lo resuelve en Socios → «Pendientes de alta»: **Dar de alta** (verifica el cupo de la suscripción, activa la cuenta, genera la cuota del período, audita `ALTA_SOCIO` y avisa por WhatsApp) o **Rechazar** (la cuenta queda desactivada; audita `RECHAZO_SOCIO`). Mientras está pendiente no se puede activar por «Reactivar socio».
+- El alta hecha por el personal (con contraseña temporal) sigue igual.
+- API: `GET /api/auth/registro/opciones` (gimnasios con sedes habilitadas), `POST /api/auth/registro`, `PATCH /api/admin/socios/:id/alta` `{ aprobar }`, filtro `?pendiente=true|false` en `GET /api/admin/socios`. Migración `20261121120000_autorregistro_socio` (solo agrega la columna).
+- Corrección en el frontend: `useAccion` devolvía `undefined` también ante respuestas 204 (sin cuerpo), y las pantallas lo tomaban como error (no cerraban el modal ni recargaban). Ahora devuelve `true` en el éxito.
+- Verificado: backend 198 pruebas (7 nuevas de autorregistro), frontend 27 (registro del socio y confirmación del alta); en el navegador, registro, ingreso bloqueado y alta confirmada.
+- TFI: se actualizan RF2, el diccionario (`socio.pendiente_alta`), el DER y el diagrama de clases (`Socio.pendienteAlta`).
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**
@@ -456,4 +466,4 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **GESTION incluye CONSULTA** en la evaluación de permisos.
 - **Vencimiento de cuotas:** día 10 (`CUOTA_DIA_VENCIMIENTO`), no definido en el TFI.
 - **A qué cuota se imputa un pago (2026-11-17; la autora pidió imputar el débito al período facturado: ver «Imputación de cuotas y conciliación de débitos»).** El TFI habla siempre de «la cuota del período» (CU-001: precondición «tiene una cuota pendiente del período», paso 2 «la cuota del período»; CU-001-003 «la cuota del período está pendiente») y no define qué pasa con cuotas **anteriores** vencidas e impagas. La implementación (`cuotaRepository.cuotaActual`) toma la cuota **pendiente o impaga más antigua**, y si no hay ninguna, la más reciente. Esa misma cuota es la que muestra «Cuotas y pagos» y la que cubren el pago único, el efectivo y cada débito automático (`registrarDebito`). Por eso, en la prueba del 17/11, `socio5` (octubre y noviembre impagas) vio y pagó primero octubre, y el primer débito de la adhesión ($28.800, con 10 %) se imputó a **octubre de 2026**, no a noviembre. Consecuencias de esa regla: con dos cuotas atrasadas, el débito queda siempre un mes atrás (el próximo débito, 17/12, cubriría noviembre), y el 10 % se aplica también a una cuota vencida. No se cambió nada: hay que decidir si se mantiene, si todos los medios pagan la cuota del período en curso, o si solo el débito automático se imputa a la cuota del período.
-- **Alta de socios:** el gimnasio entrega una contraseña temporal que el socio puede cambiar (el TFI no define el mecanismo de primer acceso).
+- **Alta de socios:** el gimnasio entrega una contraseña temporal que el socio puede cambiar (el TFI no define el mecanismo de primer acceso). Desde el 2026-11-21 el socio también puede registrarse solo y el gimnasio confirma el alta (ver «Autorregistro del socio»).

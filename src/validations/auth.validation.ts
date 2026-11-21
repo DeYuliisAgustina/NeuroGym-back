@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema, telefonoSchema, textoSchema } from './comunes.validation';
 
 export const emailSchema = z.string().trim().toLowerCase().email('Correo electrónico inválido').max(150);
 
@@ -18,4 +19,15 @@ export const loginSchema = z.object({
 export const cambioPasswordSchema = z.object({
   actual: z.string().min(1),
   nueva: passwordSchema,
+});
+
+/** RF2: autorregistro (pre-registro) del socio desde el ingreso público. */
+export const registroSocioSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema,
+  nombre: textoSchema(100),
+  apellido: textoSchema(100),
+  telefono: telefonoSchema,
+  sedeId: idSchema,
+  consentimientoDatos: z.literal(true, { message: 'Se requiere el consentimiento para el tratamiento de datos' }),
 });

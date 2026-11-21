@@ -451,6 +451,8 @@ model Socio {
   telefono            String  @db.VarChar(30)
   consentimientoDatos Boolean @map("consentimiento_datos")
   saldoPuntos         Int     @default(0) @map("saldo_puntos")
+  /// RF2: autorregistro; la cuenta queda inactiva hasta que el gimnasio confirma el alta.
+  pendienteAlta       Boolean @default(false) @map("pendiente_alta")
 
   usuario Usuario   @relation(fields: [usuarioId], references: [id])
   sede    Sede      @relation(fields: [sedeId], references: [id])

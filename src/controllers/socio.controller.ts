@@ -4,7 +4,8 @@ import { sedeService } from '../services/sede.service';
 import { socioService } from '../services/socio.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { idParam, validar } from '../utils/validar';
-import { actualizarSocioSchema, estadoSchema, filtroSociosSchema, socioSchema } from '../validations/administracion.validation';
+import { actualizarSocioSchema, altaSocioSchema, estadoSchema, filtroSociosSchema, socioSchema } from '../validations/administracion.validation';
+import { registroSocioSchema } from '../validations/auth.validation';
 import { telefonoSchema } from '../validations/comunes.validation';
 
 /** Gestión de socios (personal) y autogestión del socio. */
@@ -28,6 +29,22 @@ export const socioController = {
     const { activo } = validar(estadoSchema, req.body);
     await socioService.cambiarEstado(idParam(req.params.id), yo.gimnasioId, yo.usuarioId, activo);
     res.status(204).end();
+  },
+
+  /** RF2: el personal confirma o rechaza el pre-registro del socio. */
+  async resolverAlta(req: Request, res: Response) {
+    const yo = personalDe(req);
+    const { aprobar } = validar(altaSocioSchema, req.body);
+    await socioService.resolverAlta(idParam(req.params.id), yo.gimnasioId, yo.usuarioId, aprobar);
+    res.status(204).end();
+  },
+
+  // ---------------- Autorregistro (ingreso público) ----------------
+  async opcionesRegistro(_req: Request, res: Response) {
+    res.json(await socioService.opcionesRegistro());
+  },
+  async preRegistrar(req: Request, res: Response) {
+    res.status(201).json(await socioService.preRegistrar(validar(registroSocioSchema, req.body)));
   },
 
   // ---------------- Autogestión ----------------

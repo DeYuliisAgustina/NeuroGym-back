@@ -19,6 +19,8 @@ export const sedeSchema = z.object({
 
 export const habilitacionSchema = z.object({ habilitada: z.boolean() });
 export const estadoSchema = z.object({ activo: z.boolean() });
+/** RF2: el personal confirma (alta) o rechaza el pre-registro de un socio. */
+export const altaSocioSchema = z.object({ aprobar: z.boolean() });
 
 const permisoSchema = z.object({ modulo: z.enum(CODIGOS_MODULO as [string, ...string[]]), acceso: z.enum(['CONSULTA', 'GESTION']) });
 
@@ -58,6 +60,7 @@ export const filtroSociosSchema = z.object({
   sedeId: idSchema.optional(),
   plan: z.enum(['BASICO', 'PREMIUM']).optional(),
   activo: booleanoQuery,
+  pendiente: booleanoQuery,
   busqueda: z.string().trim().max(100).optional(),
 });
 

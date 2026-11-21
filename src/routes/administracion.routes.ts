@@ -43,6 +43,7 @@ administracionRoutes.post('/socios', permiso('SOCIOS', 'GESTION'), socioControll
 administracionRoutes.get('/socios/:id', permiso('SOCIOS', 'CONSULTA'), socioController.obtener);
 administracionRoutes.put('/socios/:id', permiso('SOCIOS', 'GESTION'), socioController.actualizar);
 administracionRoutes.patch('/socios/:id/estado', permiso('SOCIOS', 'GESTION'), socioController.cambiarEstado);
+administracionRoutes.patch('/socios/:id/alta', permiso('SOCIOS', 'GESTION'), socioController.resolverAlta);
 
 // Horarios y cupos de turnos (RF16, RD23)
 administracionRoutes.get('/turnos', permiso('SEDES', 'CONSULTA'), turnoController.listar);

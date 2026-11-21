@@ -65,6 +65,8 @@ export async function iniciarSesion(email: string, password: string, acceso: 'PU
   const valida = usuario ? await bcrypt.compare(password, usuario.passwordHash) : false;
   // Mensaje genérico: no revela si el correo existe.
   if (!usuario || !valida) throw new ErrorApp(401, 'CREDENCIALES_INVALIDAS', 'Correo o contraseña incorrectos');
+  // RF2: un socio autorregistrado no ingresa hasta que el gimnasio confirma su alta.
+  if (usuario.socio?.pendienteAlta) throw new ErrorApp(403, 'ALTA_PENDIENTE', 'Tu registro está pendiente: el gimnasio tiene que confirmar tu alta');
   if (!usuario.activo) throw new ErrorApp(403, 'CUENTA_INACTIVA', 'La cuenta está desactivada');
 
   const esAdministrativo = usuario.tipo === 'PERSONAL';

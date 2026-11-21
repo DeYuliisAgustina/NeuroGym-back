@@ -1,10 +1,11 @@
 import type { Prisma, TipoPlanSocio } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { generarPasswordTemporal } from '../utils/credenciales';
-import { conflicto, reglaNegocio } from '../utils/errores';
+import { conflicto, noEncontrado, reglaNegocio } from '../utils/errores';
 import { ahoraLocal, fechaIso } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { hashPassword } from './auth.service';
+import { servicioEnvios } from './envioMensajes.service';
 import { generarCuotaSocio } from './cuotaGeneracion.service';
 import { verificarCupoSocios } from './gimnasio.service';
 import { bonificacionVigente, preciosDePlanes, preciosParaSocio } from './precios.service';
@@ -28,11 +29,12 @@ async function planDelGimnasio(gimnasioId: number, tipo: TipoPlanSocio) {
 
 /** ABM de socios con baja lógica (RF16, RD20) y autogestión del plan (RF12). */
 export const socioService = {
-  async listar(gimnasioId: number, filtros: { sedeId?: number; plan?: TipoPlanSocio; activo?: boolean; busqueda?: string }) {
+  async listar(gimnasioId: number, filtros: { sedeId?: number; plan?: TipoPlanSocio; activo?: boolean; pendiente?: boolean; busqueda?: string }) {
     const where: Prisma.SocioWhereInput = {
       sede: { gimnasioId },
       ...(filtros.sedeId ? { sedeId: filtros.sedeId } : {}),
       ...(filtros.plan ? { plan: { tipo: filtros.plan } } : {}),
+      ...(filtros.pendiente !== undefined ? { pendienteAlta: filtros.pendiente } : {}),
       usuario: {
         ...(filtros.activo !== undefined ? { activo: filtros.activo } : {}),
         ...(filtros.busqueda
@@ -144,9 +146,91 @@ export const socioService = {
     return this.obtener(socioId, gimnasioId);
   },
 
+  // ---------------- Autorregistro (pre-registro) del socio ----------------
+
+  /** RF2: gimnasios con suscripción vigente y sus sedes habilitadas, para elegir al registrarse. */
+  opcionesRegistro() {
+    return prisma.gimnasio.findMany({
+      where: { suscripcion: { isNot: null }, sedes: { some: { habilitada: true } } },
+      select: {
+        id: true,
+        razonSocial: true,
+        sedes: { where: { habilitada: true }, select: { id: true, nombre: true, direccion: true }, orderBy: { nombre: 'asc' } },
+      },
+      orderBy: { razonSocial: 'asc' },
+    });
+  },
+
+  /**
+   * RF2: el socio se registra solo, con su propia contraseña. La cuenta queda
+   * inactiva y pendiente hasta que el personal del gimnasio confirma el alta.
+   */
+  async preRegistrar(datos: Omit<DatosSocio, 'plan'> & { password: string }) {
+    if (!datos.consentimientoDatos) throw reglaNegocio('SIN_CONSENTIMIENTO', 'Se requiere el consentimiento para el tratamiento de datos');
+    const sede = await prisma.sede.findUnique({ where: { id: datos.sedeId } });
+    if (!sede) throw noEncontrado('Sede');
+    if (!sede.habilitada) throw reglaNegocio('SEDE_DESHABILITADA', 'La sede está deshabilitada y no admite nuevos socios (RD21)');
+    if (await prisma.usuario.findUnique({ where: { email: datos.email } })) throw conflicto('EMAIL_EN_USO', 'El correo ya está registrado');
+    // Arranca con el Plan Básico; el Plan Premium se contrata después desde la app (RF12).
+    const plan = await planDelGimnasio(sede.gimnasioId, 'BASICO');
+
+    const socio = await prisma.socio.create({
+      data: {
+        sede: { connect: { id: sede.id } },
+        plan: { connect: { id: plan.id } },
+        telefono: datos.telefono,
+        consentimientoDatos: true,
+        pendienteAlta: true,
+        usuario: {
+          create: {
+            email: datos.email,
+            nombre: datos.nombre,
+            apellido: datos.apellido,
+            tipo: 'SOCIO' as const,
+            activo: false,
+            passwordHash: await hashPassword(datos.password),
+          },
+        },
+      },
+    });
+    await registrarAuditoria({ gimnasioId: sede.gimnasioId, usuarioId: socio.usuarioId, accion: 'PREREGISTRO_SOCIO', entidad: 'socio', entidadId: socio.id });
+    return { mensaje: 'Registro recibido. Tu gimnasio va a confirmar tu alta y te avisamos para que puedas ingresar.' };
+  },
+
+  /** RF2/RF16: el personal confirma el alta (activa la cuenta y genera la cuota) o rechaza el pre-registro. */
+  async resolverAlta(socioId: number, gimnasioId: number, usuarioId: number, aprobar: boolean) {
+    const socio = await tenant.socio(socioId, gimnasioId);
+    if (!socio.pendienteAlta) throw reglaNegocio('SIN_ALTA_PENDIENTE', 'El socio no tiene un registro pendiente de alta');
+
+    if (!aprobar) {
+      await prisma.socio.update({ where: { id: socioId }, data: { pendienteAlta: false } });
+      await registrarAuditoria({ gimnasioId, usuarioId, accion: 'RECHAZO_SOCIO', entidad: 'socio', entidadId: socioId });
+      return;
+    }
+    await verificarCupoSocios(gimnasioId);
+    await prisma.$transaction(async (tx) => {
+      await tx.socio.update({ where: { id: socioId }, data: { pendienteAlta: false } });
+      await tx.usuario.update({ where: { id: socio.usuarioId }, data: { activo: true } });
+      // Igual que el alta hecha por el personal: nace con la cuota del período en curso.
+      await generarCuotaSocio(socioId, ahoraLocal().fecha.slice(0, 7), tx);
+      await registrarAuditoria({ gimnasioId, usuarioId, accion: 'ALTA_SOCIO', entidad: 'socio', entidadId: socioId }, tx);
+    });
+    // Aviso por WhatsApp (RNF10); si el envío falla, el alta igual queda hecha.
+    await servicioEnvios
+      .enviar({
+        tipo: 'AVISO',
+        referencia: `alta-socio-${socioId}`,
+        usuarioId: socio.usuarioId,
+        telefono: socio.telefono,
+        texto: `¡Hola ${socio.usuario.nombre}! Tu gimnasio confirmó tu alta en NeuroGym. Ya podés ingresar con tu correo y contraseña.`,
+      })
+      .catch(() => undefined);
+  },
+
   /** RD20: baja lógica y reversible. Conserva cuotas, pagos, turnos y asistencias. */
   async cambiarEstado(socioId: number, gimnasioId: number, usuarioId: number, activo: boolean) {
     const socio = await tenant.socio(socioId, gimnasioId);
+    if (socio.pendienteAlta) throw reglaNegocio('ALTA_PENDIENTE', 'El socio tiene el registro pendiente: confirmá o rechazá el alta');
     if (socio.usuario.activo === activo) return;
     if (activo) await verificarCupoSocios(gimnasioId);
     await prisma.usuario.update({ where: { id: socio.usuarioId }, data: { activo } });

@@ -3,7 +3,7 @@ import { prisma } from '../config/prisma';
 /** Acceso a datos de usuarios y del contexto de seguridad. */
 export const usuarioRepository = {
   buscarPorEmail(email: string) {
-    return prisma.usuario.findUnique({ where: { email: email.toLowerCase() } });
+    return prisma.usuario.findUnique({ where: { email: email.toLowerCase() }, include: { socio: { select: { pendienteAlta: true } } } });
   },
 
   /** Usuario con su perfil y, si es personal, el rol con permisos para armar el Composite. */
