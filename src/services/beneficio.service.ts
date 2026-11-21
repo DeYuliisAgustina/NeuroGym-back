@@ -1,8 +1,9 @@
 import { prisma } from '../config/prisma';
-import { noEncontrado, reglaNegocio } from '../utils/errores';
+import { noEncontrado } from '../utils/errores';
 import { aFechaDb, ahoraLocal, sumarDias } from '../utils/fechas';
 import { notificacionService } from './notificacion.service';
-import { bonificacionVigente } from './precios.service';
+import { aSocio, bonificacionVigente } from './precios.service';
+import { Beneficio } from '../domain';
 
 interface DatosBeneficio {
   nombre: string;
@@ -57,18 +58,16 @@ export const beneficioService = {
       await tx.$queryRaw`SELECT socio_id FROM socio WHERE socio_id = ${socio.socioId} FOR UPDATE`;
       const beneficio = await tx.beneficio.findFirst({ where: { id: beneficioId, gimnasioId: socio.gimnasioId } });
       if (!beneficio) throw noEncontrado('Beneficio');
-      if (!beneficio.disponible) throw reglaNegocio('BENEFICIO_NO_DISPONIBLE', 'El beneficio no está disponible');
-      const { saldoPuntos } = await tx.socio.findUniqueOrThrow({ where: { id: socio.socioId } });
-      if (saldoPuntos < beneficio.costoPuntos) {
-        throw reglaNegocio('PUNTOS_INSUFICIENTES', `Necesitás ${beneficio.costoPuntos} puntos y tenés ${saldoPuntos}`);
-      }
-      await tx.socio.update({ where: { id: socio.socioId }, data: { saldoPuntos: { decrement: beneficio.costoPuntos } } });
+      // La fila del socio está bloqueada: el saldo se descuenta sobre el objeto de dominio.
+      const dominio = aSocio(await tx.socio.findUniqueOrThrow({ where: { id: socio.socioId }, include: { plan: true, usuario: true } }));
+      const resultado = dominio.canjear(new Beneficio(beneficio));
+      await tx.socio.update({ where: { id: socio.socioId }, data: { saldoPuntos: dominio.saldoPuntos } });
       return tx.canje.create({
         data: {
           socioId: socio.socioId,
           beneficioId,
-          puntosUtilizados: beneficio.costoPuntos,
-          venceEl: aFechaDb(sumarDias(ahoraLocal().fecha, beneficio.vigenciaDias)),
+          puntosUtilizados: resultado.puntosUtilizados,
+          venceEl: aFechaDb(sumarDias(ahoraLocal().fecha, resultado.vigenciaDias)),
         },
         include: { beneficio: true },
       });

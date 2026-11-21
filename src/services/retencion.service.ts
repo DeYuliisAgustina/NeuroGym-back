@@ -6,6 +6,7 @@ import { ahoraLocal, fechaIso, sumarDias } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { tieneIntelligence } from './gimnasio.service';
 import { tenant } from './tenant.service';
+import { PropuestaIncentivo } from '../domain';
 
 export type Responsable = { gimnasioId: number; personalId: number; usuarioId: number };
 
@@ -160,11 +161,12 @@ export const retencionService = {
   async aprobarPropuesta(propuestaId: number, r: Responsable) {
     const propuesta = await this.propuestaDelGimnasio(propuestaId, r.gimnasioId);
     if (propuesta.premiumDias) return this.aprobarBonificacion(propuestaId, r);
-    if (propuesta.estado === 'APROBADA') throw reglaNegocio('YA_APROBADA', 'La propuesta ya fue aprobada');
+    const dominio = new PropuestaIncentivo(propuesta);
+    dominio.aprobar(r.personalId);
     const aprobada = await prisma.$transaction(async (tx) => {
       const actualizada = await retencionRepository.actualizarPropuesta(
         propuestaId,
-        { estado: 'APROBADA', fechaAprobacion: new Date(), responsableId: r.personalId },
+        { estado: dominio.estado, fechaAprobacion: new Date(), responsableId: dominio.responsable },
         tx,
       );
       await retencionRepository.registrarNotificacion(
@@ -182,14 +184,15 @@ export const retencionService = {
   /** CU-002-010: aprueba el Plan Premium bonificado, lo habilita durante el período y lo notifica al socio. */
   async aprobarBonificacion(propuestaId: number, r: Responsable) {
     const propuesta = await this.propuestaDelGimnasio(propuestaId, r.gimnasioId);
-    if (propuesta.estado === 'APROBADA') throw reglaNegocio('YA_APROBADA', 'La propuesta ya fue aprobada');
+    const dominio = new PropuestaIncentivo(propuesta);
+    dominio.aprobar(r.personalId);
     if (!propuesta.premiumDias) throw reglaNegocio('SIN_BONIFICACION', 'La propuesta no bonifica el Plan Premium');
     const hoy = ahoraLocal().fecha;
     const dias = propuesta.premiumDias;
     const resultado = await prisma.$transaction(async (tx) => {
       const aprobada = await retencionRepository.actualizarPropuesta(
         propuestaId,
-        { estado: 'APROBADA', fechaAprobacion: new Date(), responsableId: r.personalId },
+        { estado: dominio.estado, fechaAprobacion: new Date(), responsableId: dominio.responsable },
         tx,
       );
       const bonificacion = await retencionRepository.registrarBonificacion(

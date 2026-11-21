@@ -5,6 +5,7 @@ import type { PayloadToken, UsuarioAutenticado } from '../models/auth';
 import { Rol, type ComponentePermiso, GrupoPermisos } from '../patterns/composite';
 import { usuarioRepository } from '../repositories/usuario.repository';
 import { ErrorApp, noAutenticado, reglaNegocio } from '../utils/errores';
+import { Usuario } from '../domain';
 import { registrarAuditoria } from './auditoria.service';
 
 const RONDAS_BCRYPT = 10;
@@ -62,7 +63,7 @@ export async function obtenerContexto(usuarioId: number): Promise<UsuarioAutenti
  */
 export async function iniciarSesion(email: string, password: string, acceso: 'PUBLICO' | 'ADMINISTRATIVO') {
   const usuario = await usuarioRepository.buscarPorEmail(email);
-  const valida = usuario ? await bcrypt.compare(password, usuario.passwordHash) : false;
+  const valida = usuario ? await new Usuario(usuario).verificarPassword(password) : false;
   // Mensaje genérico: no revela si el correo existe.
   if (!usuario || !valida) throw new ErrorApp(401, 'CREDENCIALES_INVALIDAS', 'Correo o contraseña incorrectos');
   // RF2: un socio autorregistrado no ingresa hasta que el gimnasio confirma su alta.
@@ -90,7 +91,7 @@ export async function iniciarSesion(email: string, password: string, acceso: 'PU
 
 export async function cambiarPassword(usuarioId: number, actual: string, nueva: string) {
   const usuario = await usuarioRepository.buscarContexto(usuarioId);
-  if (!usuario || !(await bcrypt.compare(actual, usuario.passwordHash))) {
+  if (!usuario || !(await new Usuario(usuario).verificarPassword(actual))) {
     throw reglaNegocio('PASSWORD_ACTUAL_INVALIDA', 'La contraseña actual no es correcta');
   }
   await usuarioRepository.actualizarPassword(usuarioId, await hashPassword(nueva));

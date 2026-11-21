@@ -13,6 +13,8 @@ export const ZONAS_EVITAR = {
   IMPACTO: { texto: 'saltos e impacto', excluir: /estocadas|sentadilla búlgara|cinta caminadora/i },
 } as const;
 export type ZonaEvitar = keyof typeof ZONAS_EVITAR;
+/** Enumeración ZonaEvitar del diagrama de clases (lista cerrada de zonas o movimientos a evitar). */
+export const ZonaEvitar = { ESPALDA_BAJA: 'ESPALDA_BAJA', RODILLAS: 'RODILLAS', HOMBROS: 'HOMBROS', MUNECAS: 'MUNECAS', IMPACTO: 'IMPACTO' } as const satisfies Record<ZonaEvitar, ZonaEvitar>;
 
 /** Preferencias informadas por el socio, sin datos biométricos ni de salud (RD15). */
 export interface PreferenciasRutina {

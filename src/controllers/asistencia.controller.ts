@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { PersonalAdministrativo } from '../domain';
 import { asistenciaService, type PersonalRecepcion } from '../services/asistencia.service';
 import { personalDe, socioDe } from '../utils/contexto';
 import { idParam, validar } from '../utils/validar';
@@ -14,7 +15,8 @@ import {
 
 function recepcion(req: Request): PersonalRecepcion {
   const yo = personalDe(req);
-  return { ...yo, puedeGestionar: yo.rol.tienePermiso('RECEPCION', 'GESTION') };
+  const personal = new PersonalAdministrativo(yo.rol, req.usuario?.esAdminGeneral ?? false);
+  return { ...yo, puedeGestionar: personal.puede('RECEPCION', 'GESTION') };
 }
 
 /**

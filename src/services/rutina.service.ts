@@ -5,6 +5,7 @@ import { aNumero } from '../utils/dinero';
 import { ErrorApp, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal } from '../utils/fechas';
 import { equipoDisponible } from './equipamiento.service';
+import { Ejercicio, EjercicioRutina, Rutina } from '../domain';
 
 type SocioCtx = { socioId: number; sedeId: number };
 
@@ -19,7 +20,7 @@ export const NIVELES = ['Principiante', 'Intermedio', 'Avanzado'] as const;
 async function catalogo(sedeId: number) {
   const [lista, mantenimientos] = await Promise.all([rutinaRepository.catalogoConEquipos(sedeId), equipamientoRepository.buscarMantenimientosProgramados(sedeId)]);
   return lista.map((e) => {
-    const disponible = e.equipos.length === 0 || e.equipos.some((eq) => eq.estado === 'OPERATIVO');
+    const disponible = new Ejercicio(e, e.equipos).estaDisponible();
     const hasta = mantenimientos.filter((m) => e.equipos.some((eq) => eq.id === m.equipoId)).map((m) => m.finProgramado);
     return {
       id: e.id,
@@ -146,11 +147,14 @@ export const rutinaService = {
       ejercicioId = (await rutinaRepository.buscarOCrearEjercicio(datos.nombreEjercicio.trim(), item.ejercicio.grupoMuscular)).id;
     }
     if (ejercicioId && !(await rutinaRepository.buscarEjercicio(ejercicioId))) throw noEncontrado('Ejercicio');
+    // CU-003-005: el ejercicio de la rutina ajusta su carga (los valores omitidos se conservan).
+    const dominio = new EjercicioRutina({ ...item, pesoKg: item.pesoKg === null ? null : aNumero(item.pesoKg) });
+    dominio.ajustarCarga(datos.series, datos.repeticiones, datos.pesoKg);
     await rutinaRepository.guardarRutina(ejercicioRutinaId, {
       ejercicioId,
-      series: datos.series,
-      repeticiones: datos.repeticiones,
-      pesoKg: datos.pesoKg,
+      series: datos.series === undefined ? undefined : dominio.series,
+      repeticiones: datos.repeticiones === undefined ? undefined : dominio.repeticiones,
+      pesoKg: datos.pesoKg === undefined ? undefined : dominio.peso,
       descansoSeg: datos.descansoSeg,
     });
     return this.obtenerRutina(socio);
@@ -181,8 +185,9 @@ export const rutinaService = {
     if (!item) throw noEncontrado('Ejercicio de la rutina');
     const variante = (await catalogo(socio.sedeId)).find((e) => e.id === ejercicioId);
     if (!variante) throw noEncontrado('Ejercicio');
-    if (!variante.disponible) throw reglaNegocio('VARIANTE_NO_DISPONIBLE', 'La variante elegida tampoco está disponible');
-    await rutinaRepository.reemplazarEjercicio(ejercicioRutinaId, ejercicioId);
+    const dominio = new EjercicioRutina({ ...item, pesoKg: item.pesoKg === null ? null : aNumero(item.pesoKg) });
+    dominio.reemplazarPor(variante);
+    await rutinaRepository.reemplazarEjercicio(ejercicioRutinaId, dominio.ejercicioId);
     return { mensaje: 'Variante aplicada. Tu turno se mantiene.', rutina: await this.obtenerRutina(socio) };
   },
 
@@ -190,12 +195,10 @@ export const rutinaService = {
   async registrarEntrenamiento(socio: SocioCtx, datos: { dia: number; realizados: number[] }) {
     const rutina = await rutinaRepository.buscarRutinaVigente(socio.socioId);
     if (!rutina) throw reglaNegocio('SIN_RUTINA', 'No tenés una rutina generada');
-    const delDia = rutina.ejercicios.filter((e) => e.dia === datos.dia);
-    if (delDia.length === 0) throw reglaNegocio('DIA_INVALIDO', 'La rutina no tiene ejercicios para ese día');
     const realizados = [...new Set(datos.realizados)];
-    // 5.1: si no marcó ningún ejercicio, no se registra el entrenamiento.
-    if (realizados.length === 0) throw reglaNegocio('SIN_EJERCICIOS', 'Marcá al menos un ejercicio realizado');
-    if (realizados.some((id) => !delDia.some((e) => e.id === id))) throw reglaNegocio('EJERCICIO_AJENO', 'Hay ejercicios que no pertenecen a ese día de la rutina');
+    // La rutina valida el día, que haya ejercicios marcados (5.1) y que sean de ese día.
+    const entrenamiento = new Rutina(rutina, rutina.ejercicios).registrarEntrenamiento(realizados.length, datos.dia, realizados, ahoraLocal().fecha);
+    const delDia = rutina.ejercicios.filter((e) => e.dia === datos.dia);
     // 2.1: no se puede marcar un ejercicio cuyo equipo no está disponible.
     const disponibilidad = new Map((await catalogo(socio.sedeId)).map((e) => [e.id, e.disponible]));
     if (delDia.some((e) => realizados.includes(e.id) && disponibilidad.get(e.ejercicioId) === false)) {
@@ -203,9 +206,9 @@ export const rutinaService = {
     }
     return rutinaRepository.guardarEntrenamiento({
       rutinaId: rutina.id,
-      fecha: aFechaDb(ahoraLocal().fecha),
-      ejerciciosCompletados: realizados.length,
-      ejerciciosTotales: delDia.length,
+      fecha: aFechaDb(entrenamiento.fecha),
+      ejerciciosCompletados: entrenamiento.completados,
+      ejerciciosTotales: entrenamiento.total,
     });
   },
 

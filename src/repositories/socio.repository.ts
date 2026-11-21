@@ -31,7 +31,8 @@ export const socioRepository = {
   },
 
   /** CU-004-009: suma los puntos del día al saldo del socio. */
-  sumarPuntos(socioId: number, puntos: number, tx: Tx) {
-    return tx.socio.update({ where: { id: socioId }, data: { saldoPuntos: { increment: puntos } } });
+  /** Guarda el saldo de puntos que calculó Socio.sumarPuntos() (Figura 105). */
+  sumarPuntos(socioId: number, saldoPuntos: number, tx: Tx) {
+    return tx.socio.update({ where: { id: socioId }, data: { saldoPuntos } });
   },
 };

@@ -1,5 +1,6 @@
 import { Prisma, type MedioPago } from '@prisma/client';
 import { prisma, type Tx } from '../../config/prisma';
+import { AdhesionDebito, Comprobante, Cuota, Pago } from '../../domain';
 import type {
   CobroDeSuscripcion,
   MercadoPagoGateway,
@@ -19,6 +20,10 @@ import { ErrorApp, noEncontrado, reglaNegocio } from '../../utils/errores';
 import { aFechaDb, ahoraLocal, fechaIso, periodoDe, sumarDias } from '../../utils/fechas';
 import { crearEstrategiasCobro, type ComposicionImporte, type EstrategiaCobro } from '../strategy';
 
+
+/** Objeto de dominio Pago a partir del registro guardado. */
+const aPago = (p: { medio: MedioPago; importe: Prisma.Decimal; fecha: Date; estado: Pago['estado']; referenciaExterna: string | null; responsableId: number | null }) =>
+  new Pago({ ...p, importe: aNumero(p.importe) });
 /** Quién consulta una cuota: el socio titular o el personal de su gimnasio (RNF4). */
 export type Solicitante = { socioId: number } | { gimnasioId: number };
 
@@ -252,7 +257,9 @@ export class CuotaService {
    */
   private async darDeBajaLocal(tx: Tx, adhesion: { id: number; socioId: number }, accion: string, detalle: Prisma.InputJsonValue) {
     const hoy = ahoraLocal().fecha;
-    const actualizada = await cuotaRepository.actualizarAdhesion(adhesion.id, { estado: 'CANCELADA', fechaBaja: aFechaDb(hoy) }, tx);
+    const dominio = new AdhesionDebito(await tx.adhesionDebito.findUniqueOrThrow({ where: { id: adhesion.id } }));
+    dominio.cancelar(aFechaDb(hoy));
+    const actualizada = await cuotaRepository.actualizarAdhesion(adhesion.id, { estado: dominio.estado, fechaBaja: dominio.fechaBaja! }, tx);
     await this.marcarVencidasImpagas(tx, adhesion.socioId);
     await registrarAuditoria({ accion, entidad: 'adhesion_debito', entidadId: adhesion.id, detalle }, tx);
     return actualizada;
@@ -388,7 +395,9 @@ export class CuotaService {
         await registrarAuditoria({ accion: 'PAGO_SOBRE_CUOTA_PAGADA', entidad: 'pago', entidadId: pago.id }, tx);
         return { procesado: true, pagoId: pago.id, aprobado: false };
       }
-      await cuotaRepository.guardarResultado(pago.id, { estado: 'APROBADO', referenciaExterna: op.referenciaExterna }, tx);
+      const aprobado = aPago(pago);
+      aprobado.confirmar(op.referenciaExterna);
+      await cuotaRepository.guardarResultado(pago.id, { estado: aprobado.estado, referenciaExterna: aprobado.referenciaExterna ?? undefined }, tx);
       // La composición se calcula con los precios vigentes al iniciar el pago.
       const precios = await cuotaRepository.obtenerPreciosVigentes(cuota.socioId, ahoraLocal(pago.fecha).fecha, tx);
       await this.confirmarPago(tx, pago.id, this.estrategias.PAGO_UNICO.calcularImporte(precios));
@@ -442,7 +451,9 @@ export class CuotaService {
           return { procesado: false, pendienteConciliacion: true, aprobado: false };
         }
         const composicion = await this.composicionDebito(cuota.socioId, op, tx);
-        await cuotaRepository.guardarResultado(existente.id, { estado: 'APROBADO', importe: op.importe ?? composicion.importeFinal }, tx);
+        const aprobado = aPago(existente);
+        aprobado.confirmar();
+        await cuotaRepository.guardarResultado(existente.id, { estado: aprobado.estado, importe: op.importe ?? composicion.importeFinal }, tx);
         await this.confirmarPago(tx, existente.id, composicion);
         await registrarAuditoria({ accion: 'DEBITO_REGISTRADO', entidad: 'pago', entidadId: existente.id, detalle: { ...detalle, reintento: true } }, tx);
         return { procesado: true, pagoId: existente.id, aprobado: true };
@@ -603,19 +614,27 @@ export class CuotaService {
 
   /** CU-001-007 pasos 1 y 2: cuota PAGADA con su composición y comprobante emitido. */
   private async confirmarPago(tx: Tx, pagoId: number, composicion: ComposicionImporte) {
-    const pago = await tx.pago.findUniqueOrThrow({ where: { id: pagoId } });
+    const pago = await tx.pago.findUniqueOrThrow({ where: { id: pagoId }, include: { cuota: true } });
+    const cuota = new Cuota({
+      ...pago.cuota,
+      cuotaBase: aNumero(pago.cuota.cuotaBase),
+      adicionalPremium: aNumero(pago.cuota.adicionalPremium),
+      descuento: aNumero(pago.cuota.descuento),
+      importeFinal: aNumero(pago.cuota.importeFinal),
+    });
+    cuota.marcarPagada(composicion);
     await cuotaRepository.actualizarCuota(
       pago.cuotaId,
       {
-        estado: 'PAGADA',
-        cuotaBase: composicion.cuotaBase,
-        adicionalPremium: composicion.adicionalPremium,
-        descuento: composicion.descuento,
-        importeFinal: composicion.importeFinal,
+        estado: cuota.estado as 'PAGADA',
+        cuotaBase: cuota.cuotaBase,
+        adicionalPremium: cuota.adicionalPremium,
+        descuento: cuota.descuento,
+        importeFinal: cuota.importeFinal,
       },
       tx,
     );
-    await cuotaRepository.guardarComprobante(pagoId, `NG-${String(pagoId).padStart(8, '0')}`, tx);
+    await cuotaRepository.guardarComprobante(pagoId, Comprobante.numeroPara(pagoId), tx);
   }
 
   /** CU-001-007 paso 3: envío por WhatsApp. Si falla, el comprobante queda en el historial (3.1). */
@@ -641,10 +660,7 @@ export class CuotaService {
     if (!pago?.comprobante) return null;
     const { socio } = pago.cuota;
     // Acompaña al PDF (caption); el comprobante completo es el archivo adjunto.
-    const texto =
-      `NeuroGym · Comprobante ${pago.comprobante.numero}\n` +
-      `Tu pago de ${dinero(aNumero(pago.importe))} de la cuota ${mesAnio(pago.cuota.periodo)} fue registrado. ` +
-      'Te enviamos el comprobante en PDF.';
+    const texto = new Comprobante(pago.comprobante).obtenerDetalle({ importe: dinero(aNumero(pago.importe)), periodo: mesAnio(pago.cuota.periodo) });
     if (opciones.avisoInterno !== false) {
       await notificacionService.notificar({ usuarioId: socio.usuarioId, tipo: 'PAGO', mensaje: `Pago confirmado: cuota ${pago.cuota.periodo}.` });
     }

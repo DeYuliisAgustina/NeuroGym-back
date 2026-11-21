@@ -1,32 +1,29 @@
 import type { EstadoTurnoProfesional, ModalidadConsulta, TipoEventoTurno } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
 import { gestorEventosTurno, type TurnoObservado } from '../patterns/observer';
-import { aNumero, redondear } from '../utils/dinero';
+import { aNumero } from '../utils/dinero';
 import { noEncontrado, prohibido, reglaNegocio } from '../utils/errores';
 import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, fechaIso, horaTexto, minutosDeHora, sumarDias } from '../utils/fechas';
 import { GeneradorEventoCalendario } from '../utils/GeneradorEventoCalendario';
 import { notificacionService } from './notificacion.service';
 import { esPremium } from './precios.service';
+import { PlanMarketplace, TRANSICIONES, TurnoProfesional } from '../domain';
 
 /**
  * RD16: transiciones válidas del turno profesional, validadas en el backend.
- * SOLICITADO → confirmar, rechazar o cancelar; CONFIRMADO/REPROGRAMADO →
- * reprogramar (sin nueva aprobación), cancelar o completar luego de su fecha.
+ * La tabla y los cambios de estado viven en la clase TurnoProfesional del dominio.
  */
-export const TRANSICIONES: Record<EstadoTurnoProfesional, EstadoTurnoProfesional[]> = {
-  SOLICITADO: ['CONFIRMADO', 'RECHAZADO', 'CANCELADO'],
-  CONFIRMADO: ['REPROGRAMADO', 'CANCELADO', 'COMPLETADO'],
-  REPROGRAMADO: ['REPROGRAMADO', 'CANCELADO', 'COMPLETADO'],
-  RECHAZADO: [],
-  CANCELADO: [],
-  COMPLETADO: [],
-};
+export { TRANSICIONES };
 
 export function validarTransicion(actual: EstadoTurnoProfesional, nuevo: EstadoTurnoProfesional): void {
   if (!TRANSICIONES[actual].includes(nuevo)) {
     throw reglaNegocio('TRANSICION_INVALIDA', `Un turno ${actual.toLowerCase()} no puede pasar a ${nuevo.toLowerCase()}`);
   }
 }
+
+/** Objeto de dominio del turno guardado (fecha y hora en texto, como en el diagrama). */
+const aDominio = (t: { fecha: Date; horaInicio: Date; modalidad: ModalidadConsulta; estado: EstadoTurnoProfesional; motivo: string | null }) =>
+  new TurnoProfesional({ fecha: fechaIso(t.fecha), hora: horaTexto(t.horaInicio), modalidad: t.modalidad, estado: t.estado, motivo: t.motivo });
 
 const ACTIVOS: EstadoTurnoProfesional[] = ['SOLICITADO', 'CONFIRMADO', 'REPROGRAMADO'];
 
@@ -198,8 +195,9 @@ export const turnoProfesionalService = {
   async confirmar(profesional: { profesionalId: number; usuarioId: number }, turnoId: number) {
     const { turno, esProfesional } = await turnoDeActor(turnoId, profesional);
     if (!esProfesional) throw prohibido();
-    validarTransicion(turno.estado, 'CONFIRMADO');
-    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: 'CONFIRMADO' } });
+    const dominio = aDominio(turno);
+    dominio.confirmar();
+    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: dominio.estado } });
     await notificacionService.notificar({
       usuarioId: turno.socio.usuarioId,
       tipo: 'TURNO_PROFESIONAL',
@@ -212,8 +210,9 @@ export const turnoProfesionalService = {
   async rechazar(profesional: { profesionalId: number; usuarioId: number }, turnoId: number, motivo: string) {
     const { turno, esProfesional } = await turnoDeActor(turnoId, profesional);
     if (!esProfesional) throw prohibido();
-    validarTransicion(turno.estado, 'RECHAZADO');
-    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: 'RECHAZADO', motivo } });
+    const dominio = aDominio(turno);
+    dominio.rechazar(motivo);
+    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: dominio.estado, motivo: dominio.motivo } });
     await notificacionService.notificar({
       usuarioId: turno.socio.usuarioId,
       tipo: 'TURNO_PROFESIONAL',
@@ -228,11 +227,12 @@ export const turnoProfesionalService = {
    */
   async cancelar(actor: Actor, turnoId: number, motivo: string) {
     const { turno, esProfesional } = await turnoDeActor(turnoId, actor);
-    validarTransicion(turno.estado, 'CANCELADO');
+    const dominio = aDominio(turno);
+    dominio.cancelar(motivo);
     if (esProfesional && turno.estado === 'SOLICITADO') {
       throw reglaNegocio('USAR_RECHAZO', 'Para una solicitud pendiente, el profesional debe rechazarla');
     }
-    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: 'CANCELADO', motivo } });
+    await prisma.turnoProfesional.update({ where: { id: turnoId }, data: { estado: dominio.estado, motivo: dominio.motivo } });
     await emitirEvento(turnoId, 'CANCELADO', actor.usuarioId);
     return describir((await buscarTurno(turnoId))!);
   },
@@ -240,12 +240,13 @@ export const turnoProfesionalService = {
   /** RF39: reprogramación según disponibilidad, sin nueva aprobación. Evento REPROGRAMADO. */
   async reprogramar(actor: Actor, turnoId: number, datos: { fecha: string; horaInicio: string }) {
     const { turno } = await turnoDeActor(turnoId, actor);
-    validarTransicion(turno.estado, 'REPROGRAMADO');
-    const slot = (await horariosLibres(turno.profesionalId, datos.fecha, turnoId)).find((s) => s.horaInicio === datos.horaInicio);
+    const dominio = aDominio(turno);
+    dominio.reprogramar(datos.fecha, datos.horaInicio);
+    const slot = (await horariosLibres(turno.profesionalId, datos.fecha, turnoId)).find((s) => s.horaInicio === dominio.hora);
     if (!slot) throw reglaNegocio('HORARIO_NO_DISPONIBLE', 'El nuevo horario no está disponible');
     await prisma.turnoProfesional.update({
       where: { id: turnoId },
-      data: { estado: 'REPROGRAMADO', fecha: aFechaDb(datos.fecha), horaInicio: aHoraDb(slot.horaInicio), horaFin: aHoraDb(slot.horaFin) },
+      data: { estado: dominio.estado, fecha: aFechaDb(dominio.fecha), horaInicio: aHoraDb(slot.horaInicio), horaFin: aHoraDb(slot.horaFin) },
     });
     await emitirEvento(turnoId, 'REPROGRAMADO', actor.usuarioId);
     return describir((await buscarTurno(turnoId))!);
@@ -259,27 +260,32 @@ export const turnoProfesionalService = {
   async completar(profesional: { profesionalId: number; usuarioId: number }, turnoId: number, importeDeclarado: number) {
     const { turno, esProfesional } = await turnoDeActor(turnoId, profesional);
     if (!esProfesional) throw prohibido();
-    validarTransicion(turno.estado, 'COMPLETADO');
+    const prof = await prisma.profesional.findUniqueOrThrow({ where: { id: profesional.profesionalId }, include: { plan: true } });
+    const plan = new PlanMarketplace({
+      tipo: prof.plan.tipo,
+      precioMensualUsd: aNumero(prof.plan.precioMensualUsd),
+      porcentajeComision: aNumero(prof.plan.porcentajeComision),
+      perfilPromocionado: prof.plan.perfilPromocionado,
+    });
+    const dominio = aDominio(turno);
+    const comision = dominio.registrarRealizada(importeDeclarado, plan, prof.consultasExentas > 0);
     const hoy = ahoraLocal();
     const fecha = fechaIso(turno.fecha);
     if (fecha > hoy.fecha || (fecha === hoy.fecha && minutosDeHora(turno.horaFin) > hoy.minutos)) {
       throw reglaNegocio('CONSULTA_FUTURA', 'La consulta solo puede registrarse como realizada después de su horario');
     }
     await prisma.$transaction(async (tx) => {
-      const prof = await tx.profesional.findUniqueOrThrow({ where: { id: profesional.profesionalId }, include: { plan: true } });
-      const exenta = prof.consultasExentas > 0;
-      const porcentaje = aNumero(prof.plan.porcentajeComision);
-      await tx.turnoProfesional.update({ where: { id: turnoId }, data: { estado: 'COMPLETADO' } });
+      await tx.turnoProfesional.update({ where: { id: turnoId }, data: { estado: dominio.estado } });
       await tx.comision.create({
         data: {
           turnoProfesionalId: turnoId,
-          importeDeclarado,
-          porcentaje,
-          importeComision: exenta ? 0 : redondear((importeDeclarado * porcentaje) / 100),
-          exenta,
+          importeDeclarado: comision.importeDeclarado,
+          porcentaje: comision.porcentaje,
+          importeComision: comision.importe,
+          exenta: comision.exenta,
         },
       });
-      if (exenta) await tx.profesional.update({ where: { id: prof.id }, data: { consultasExentas: { decrement: 1 } } });
+      if (comision.exenta) await tx.profesional.update({ where: { id: prof.id }, data: { consultasExentas: { decrement: 1 } } });
     });
     return describir((await buscarTurno(turnoId))!);
   },

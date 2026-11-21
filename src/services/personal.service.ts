@@ -1,4 +1,5 @@
 import type { TipoAcceso } from '@prisma/client';
+import { Usuario } from '../domain';
 import { prisma } from '../config/prisma';
 import { CODIGOS_MODULO, type CodigoModulo } from '../models/modulos';
 import { generarPasswordTemporal } from '../utils/credenciales';
@@ -75,7 +76,10 @@ export const personalService = {
     const personal = await tenant.personal(personalId, gimnasioId);
     if (!activo && personalId === solicitante.personalId) throw reglaNegocio('AUTO_DESACTIVACION', 'No podés desactivar tu propia cuenta');
     if (!activo && personal.rol.esPrincipal) await verificarOtroAdminGeneral(gimnasioId, personalId);
-    await prisma.usuario.update({ where: { id: personal.usuarioId }, data: { activo } });
+    const usuario = new Usuario(personal.usuario);
+    if (activo) usuario.reactivar();
+    else usuario.desactivar();
+    await prisma.usuario.update({ where: { id: personal.usuarioId }, data: { activo: usuario.activo } });
     await registrarAuditoria({
       gimnasioId,
       usuarioId: solicitante.usuarioId,

@@ -2,6 +2,7 @@ import type { TipoNotificacion } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
 import { servicioEnvios } from './envioMensajes.service';
 import { noEncontrado } from '../utils/errores';
+import { Notificacion } from '../domain';
 
 /** Notificaciones internas (RF33) y avisos por mensajería compatible con WhatsApp (RNF10). */
 export const notificacionService = {
@@ -46,8 +47,11 @@ export const notificacionService = {
 
   async marcarLeida(usuarioId: number, notificacionId: number) {
     // El filtro por usuario impide marcar notificaciones ajenas.
-    const { count } = await prisma.notificacion.updateMany({ where: { id: notificacionId, usuarioId }, data: { leida: true } });
-    if (count === 0) throw noEncontrado('Notificación');
+    const registro = await prisma.notificacion.findFirst({ where: { id: notificacionId, usuarioId } });
+    if (!registro) throw noEncontrado('Notificación');
+    const notificacion = new Notificacion(registro);
+    notificacion.marcarLeida();
+    await prisma.notificacion.update({ where: { id: notificacionId }, data: { leida: notificacion.leida } });
   },
 
   marcarTodasLeidas(usuarioId: number) {

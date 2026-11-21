@@ -3,6 +3,7 @@ import { reglaNegocio } from '../utils/errores';
 import { aFechaDb, aHoraDb, ahoraLocal, diaSemanaIso, fechaIso, horaTexto, sumarDias } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { tenant } from './tenant.service';
+import { TurnoClase } from '../domain';
 
 interface DatosTurno {
   sedeId: number;
@@ -146,10 +147,13 @@ export const turnoService = {
 
   /** RD23: un turno deshabilitado solo deja de admitir nuevas reservas. */
   async cambiarHabilitacion(turnoId: number, gimnasioId: number, usuarioId: number, habilitado: boolean) {
-    await tenant.turnoClase(turnoId, gimnasioId);
+    const actual = await tenant.turnoClase(turnoId, gimnasioId);
+    const dominio = new TurnoClase({ ...actual, fecha: fechaIso(actual.fecha), horario: `${horaTexto(actual.horaInicio)}-${horaTexto(actual.horaFin)}` });
+    if (habilitado) dominio.habilitar();
+    else dominio.deshabilitar();
     const turno = await prisma.turnoClase.update({
       where: { id: turnoId },
-      data: { habilitado },
+      data: { habilitado: dominio.habilitado },
       include: { sede: { select: { nombre: true } }, ...contarReservadas },
     });
     await registrarAuditoria({ gimnasioId, usuarioId, accion: habilitado ? 'HABILITAR_TURNO' : 'DESHABILITAR_TURNO', entidad: 'turno_clase', entidadId: turnoId });

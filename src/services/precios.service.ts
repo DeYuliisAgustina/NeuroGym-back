@@ -1,8 +1,9 @@
 import type { TipoPlanSocio } from '@prisma/client';
 import { prisma, type Tx } from '../config/prisma';
 import type { PreciosCuota } from '../patterns/strategy';
-import { aFechaDb, ahoraLocal } from '../utils/fechas';
+import { aFechaDb, ahoraLocal, fechaIso } from '../utils/fechas';
 import { aNumero, redondear } from '../utils/dinero';
+import { BonificacionPremium, Socio } from '../domain';
 
 type Cliente = Tx | typeof prisma;
 
@@ -36,11 +37,23 @@ export function bonificacionVigente(socioId: number, fecha = ahoraLocal().fecha,
   });
 }
 
+/** Objeto de dominio Socio a partir del registro guardado (con su usuario y su plan). */
+export function aSocio(
+  s: { telefono: string; consentimientoDatos: boolean; saldoPuntos: number; pendienteAlta: boolean; usuario: { apellido: string }; plan: { tipo: TipoPlanSocio } },
+  bonificaciones: { desde: Date; hasta: Date; porcentaje: unknown; responsableId: number }[] = [],
+) {
+  return new Socio(
+    { ...s, apellido: s.usuario.apellido, plan: s.plan.tipo },
+    bonificaciones.map((b) => new BonificacionPremium({ desde: fechaIso(b.desde), hasta: fechaIso(b.hasta), porcentaje: Number(b.porcentaje), responsableId: b.responsableId })),
+  );
+}
+
 /** esPremium() del diagrama de clases: plan Premium contratado o bonificación vigente. */
 export async function esPremium(socioId: number, cliente: Cliente = prisma): Promise<boolean> {
-  const socio = await cliente.socio.findUniqueOrThrow({ where: { id: socioId }, include: { plan: true } });
-  if (socio.plan.tipo === 'PREMIUM') return true;
-  return (await bonificacionVigente(socioId, undefined, cliente)) !== null;
+  const socio = await cliente.socio.findUniqueOrThrow({ where: { id: socioId }, include: { plan: true, usuario: true } });
+  const hoy = ahoraLocal().fecha;
+  const bonificacion = socio.plan.tipo === 'PREMIUM' ? null : await bonificacionVigente(socioId, hoy, cliente);
+  return aSocio(socio, bonificacion ? [bonificacion] : []).esPremium(hoy);
 }
 
 /**

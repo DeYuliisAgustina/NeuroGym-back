@@ -12,6 +12,9 @@ const VENTANA_HISTORIAL_DIAS = 70;
  * Ninguna acción se ejecuta automáticamente sobre los socios (RD10).
  */
 export class ProcesoETLAsistencia {
+  /** Instante de la última ejecución (la de cada gimnasio queda además en gimnasio.ultima_ejecucion_etl). */
+  ultimaEjecucion: Date | null = null;
+
   async ejecutar(gimnasioId: number, hoy = ahoraLocal().fecha) {
     const gimnasio = await prisma.gimnasio.findUniqueOrThrow({ where: { id: gimnasioId }, include: { suscripcion: true } });
     const desde = gimnasio.ultimaEjecucionEtl ? sumarDias(ahoraLocal(gimnasio.ultimaEjecucionEtl).fecha, -1) : sumarDias(hoy, -VENTANA_HISTORIAL_DIAS);
@@ -19,7 +22,8 @@ export class ProcesoETLAsistencia {
     const historiales = await this.historiales(gimnasioId, hoy);
     const senales = await this.detectarSenales(gimnasioId, historiales, hoy);
     const estimaciones = gimnasio.suscripcion?.tipo === 'INTELLIGENCE' ? await this.estimarRiesgo(gimnasioId, historiales, hoy) : 0;
-    await prisma.gimnasio.update({ where: { id: gimnasioId }, data: { ultimaEjecucionEtl: new Date() } });
+    this.ultimaEjecucion = new Date();
+    await prisma.gimnasio.update({ where: { id: gimnasioId }, data: { ultimaEjecucionEtl: this.ultimaEjecucion } });
     return { gimnasioId, desde, hasta: hoy, indicadores, senales, estimaciones };
   }
 

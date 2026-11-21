@@ -1,4 +1,5 @@
 import type { PoliticaCuotaPendiente } from '@prisma/client';
+import { Gimnasio, SuscripcionSaaS } from '../domain';
 import { prisma, type Tx } from '../config/prisma';
 import { noEncontrado, reglaNegocio } from '../utils/errores';
 import { registrarAuditoria } from './auditoria.service';
@@ -35,9 +36,11 @@ export function contarSociosActivos(gimnasioId: number, cliente: Cliente = prism
 
 /** RD2: límite de socios activos de la suscripción contratada. */
 export async function verificarCupoSocios(gimnasioId: number, cliente: Cliente = prisma) {
-  const suscripcion = await cliente.suscripcionSaas.findUnique({ where: { gimnasioId } });
+  const gimnasio = await cliente.gimnasio.findUniqueOrThrow({ where: { id: gimnasioId }, include: { suscripcion: true } });
+  const suscripcion = gimnasio.suscripcion;
   if (!suscripcion) throw reglaNegocio('SIN_SUSCRIPCION', 'El gimnasio no tiene una suscripción vigente');
-  if ((await contarSociosActivos(gimnasioId, cliente)) >= suscripcion.maxSociosActivos) {
+  const dominio = new Gimnasio(gimnasio, new SuscripcionSaaS(suscripcion), 0);
+  if (!dominio.admiteSocios(await contarSociosActivos(gimnasioId, cliente))) {
     throw reglaNegocio(
       'LIMITE_SOCIOS',
       `La suscripción ${suscripcion.tipo} admite hasta ${suscripcion.maxSociosActivos} socios activos. Consultá una cotización personalizada.`,
@@ -48,5 +51,5 @@ export async function verificarCupoSocios(gimnasioId: number, cliente: Cliente =
 /** RD3: la analítica avanzada de retención es exclusiva de NeuroGym Intelligence. */
 export async function tieneIntelligence(gimnasioId: number): Promise<boolean> {
   const suscripcion = await prisma.suscripcionSaas.findUnique({ where: { gimnasioId } });
-  return suscripcion?.tipo === 'INTELLIGENCE';
+  return suscripcion ? new SuscripcionSaaS(suscripcion).incluyeAnaliticaAvanzada() : false;
 }

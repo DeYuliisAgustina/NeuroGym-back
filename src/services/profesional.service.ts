@@ -6,6 +6,7 @@ import { conflicto, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aHoraDb, horaTexto } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { firmarToken, hashPassword, obtenerContexto, describirSesion } from './auth.service';
+import { Profesional } from '../domain';
 
 interface RegistroProfesional {
   email: string;
@@ -86,6 +87,12 @@ export const profesionalService = {
     datos: { nombre?: string; apellido?: string; modalidadAtencion?: ModalidadAtencion; valorConsulta?: number; publicacionPausada?: boolean },
   ) {
     const { nombre, apellido, ...resto } = datos;
+    if (resto.publicacionPausada) {
+      const registro = await prisma.profesional.findUniqueOrThrow({ where: { id: profesionalId } });
+      const dominio = new Profesional({ ...registro, valorConsulta: aNumero(registro.valorConsulta) });
+      dominio.pausarPublicacion();
+      resto.publicacionPausada = dominio.pausado;
+    }
     const p = await prisma.profesional.update({
       where: { id: profesionalId },
       data: { ...resto, usuario: nombre || apellido ? { update: { nombre, apellido } } : undefined },
@@ -138,10 +145,11 @@ export const profesionalService = {
 
   // Métodos de pago (RF36)
   async crearMetodoPago(profesionalId: number, datos: { tipo: TipoMetodoPago; obraSocial?: string }) {
-    if (datos.tipo === 'OBRA_SOCIAL' && !datos.obraSocial?.trim()) throw reglaNegocio('OBRA_SOCIAL_REQUERIDA', 'Indicá la obra social');
-    return prisma.metodoPagoConsulta.create({
-      data: { profesionalId, tipo: datos.tipo, obraSocial: datos.tipo === 'OBRA_SOCIAL' ? datos.obraSocial!.trim() : null },
-    });
+    const registro = await prisma.profesional.findUniqueOrThrow({ where: { id: profesionalId }, include: { metodosPago: true } });
+    const dominio = new Profesional({ ...registro, valorConsulta: aNumero(registro.valorConsulta) }, registro.metodosPago);
+    dominio.habilitarMetodo({ tipo: datos.tipo, obraSocial: datos.obraSocial ?? null });
+    const metodo = dominio.metodos[dominio.metodos.length - 1];
+    return prisma.metodoPagoConsulta.create({ data: { profesionalId, tipo: metodo.tipo, obraSocial: metodo.obraSocial } });
   },
   async eliminarMetodoPago(profesionalId: number, metodoPagoId: number) {
     const metodo = await prisma.metodoPagoConsulta.findFirst({ where: { id: metodoPagoId, profesionalId }, include: { _count: { select: { turnos: true } } } });

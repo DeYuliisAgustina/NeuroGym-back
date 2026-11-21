@@ -3,6 +3,7 @@ import { noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal, fechaIso, horaTexto, minutosDeHora, sumarDias } from '../utils/fechas';
 import { notificacionService } from './notificacion.service';
 import { describirTurno } from './turno.service';
+import { Reserva, TurnoClase } from '../domain';
 
 /** Reservas de turnos de clases y musculación (RF3). Una reserva no es una asistencia. */
 export const reservaService = {
@@ -49,7 +50,8 @@ export const reservaService = {
         throw reglaNegocio('TURNO_INICIADO', 'El turno ya comenzó o finalizó');
       }
       const ocupados = await tx.reserva.count({ where: { turnoClaseId: turnoId, estado: 'RESERVADO' } });
-      if (ocupados >= turno.cupo) throw reglaNegocio('SIN_CUPO', 'No hay cupos disponibles para este turno');
+      const turnoClase = new TurnoClase({ ...turno, fecha, horario: `${horaTexto(turno.horaInicio)}-${horaTexto(turno.horaFin)}` }, ocupados);
+      if (!turnoClase.hayCupo()) throw reglaNegocio('SIN_CUPO', 'No hay cupos disponibles para este turno');
 
       // Evita que el socio reserve dos turnos superpuestos el mismo día.
       const superpuesta = await tx.reserva.findFirst({
@@ -87,14 +89,10 @@ export const reservaService = {
       include: { turno: true, asistencia: true },
     });
     if (!reserva) throw noEncontrado('Reserva');
-    if (reserva.estado === 'CANCELADO') throw reglaNegocio('YA_CANCELADA', 'La reserva ya está cancelada');
-    if (reserva.asistencia) throw reglaNegocio('CON_ASISTENCIA', 'La reserva ya tiene una asistencia registrada');
-    const hoy = ahoraLocal();
     const fecha = fechaIso(reserva.turno.fecha);
-    if (fecha < hoy.fecha || (fecha === hoy.fecha && minutosDeHora(reserva.turno.horaInicio) <= hoy.minutos)) {
-      throw reglaNegocio('TURNO_INICIADO', 'No se puede cancelar un turno que ya comenzó');
-    }
-    const cancelada = await prisma.reserva.update({ where: { id: reservaId }, data: { estado: 'CANCELADO', fechaCancelacion: new Date() } });
+    const dominio = new Reserva(reserva, { fecha, inicioMin: minutosDeHora(reserva.turno.horaInicio) }, Boolean(reserva.asistencia));
+    dominio.cancelar(ahoraLocal());
+    const cancelada = await prisma.reserva.update({ where: { id: reservaId }, data: { estado: dominio.estado, fechaCancelacion: new Date() } });
     await notificacionService.notificar({
       usuarioId: socio.usuarioId,
       tipo: 'TURNO_CLASE',

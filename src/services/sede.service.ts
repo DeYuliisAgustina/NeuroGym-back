@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma';
-import { reglaNegocio } from '../utils/errores';
+import { Gimnasio, Sede, SuscripcionSaaS } from '../domain';
 import { registrarAuditoria } from './auditoria.service';
 import { tenant } from './tenant.service';
 
@@ -9,13 +9,11 @@ interface DatosSede {
   horarios: string;
 }
 
-/** RD2: límite de sedes habilitadas según la suscripción SaaS. */
-async function verificarCupoSedes(gimnasioId: number) {
-  const suscripcion = await prisma.suscripcionSaas.findUniqueOrThrow({ where: { gimnasioId } });
+/** RD2: el gimnasio agrega una sede habilitada solo si su suscripción SaaS lo permite. */
+async function verificarCupoSedes(gimnasioId: number, sede: Sede) {
+  const gimnasio = await prisma.gimnasio.findUniqueOrThrow({ where: { id: gimnasioId }, include: { suscripcion: true } });
   const habilitadas = await prisma.sede.count({ where: { gimnasioId, habilitada: true } });
-  if (habilitadas >= suscripcion.maxSedes) {
-    throw reglaNegocio('LIMITE_SEDES', `La suscripción ${suscripcion.tipo} admite hasta ${suscripcion.maxSedes} sedes habilitadas.`);
-  }
+  new Gimnasio(gimnasio, new SuscripcionSaaS(gimnasio.suscripcion!), habilitadas).agregarSede(sede);
 }
 
 /** ABM de sedes con baja lógica y reversible (RF16, RD20, RD21). */
@@ -31,15 +29,16 @@ export const sedeService = {
   obtener: (sedeId: number, gimnasioId: number) => tenant.sede(sedeId, gimnasioId),
 
   async crear(gimnasioId: number, usuarioId: number, datos: DatosSede) {
-    await verificarCupoSedes(gimnasioId);
+    await verificarCupoSedes(gimnasioId, new Sede({ ...datos, habilitada: true }));
     const sede = await prisma.sede.create({ data: { ...datos, gimnasioId } });
     await registrarAuditoria({ gimnasioId, usuarioId, accion: 'ALTA_SEDE', entidad: 'sede', entidadId: sede.id });
     return sede;
   },
 
   async actualizar(sedeId: number, gimnasioId: number, usuarioId: number, datos: Partial<DatosSede>) {
-    await tenant.sede(sedeId, gimnasioId);
-    const sede = await prisma.sede.update({ where: { id: sedeId }, data: datos });
+    const actual = new Sede(await tenant.sede(sedeId, gimnasioId));
+    if (datos.horarios !== undefined) actual.configurarHorarios(datos.horarios);
+    const sede = await prisma.sede.update({ where: { id: sedeId }, data: { ...datos, ...(datos.horarios !== undefined ? { horarios: actual.horarios } : {}) } });
     await registrarAuditoria({ gimnasioId, usuarioId, accion: 'MODIFICAR_SEDE', entidad: 'sede', entidadId: sedeId, detalle: datos });
     return sede;
   },
@@ -51,8 +50,10 @@ export const sedeService = {
   async cambiarHabilitacion(sedeId: number, gimnasioId: number, usuarioId: number, habilitada: boolean) {
     const sede = await tenant.sede(sedeId, gimnasioId);
     if (sede.habilitada === habilitada) return sede;
-    if (habilitada) await verificarCupoSedes(gimnasioId);
-    const actualizada = await prisma.sede.update({ where: { id: sedeId }, data: { habilitada } });
+    const dominio = new Sede(sede);
+    if (habilitada) await verificarCupoSedes(gimnasioId, dominio);
+    dominio.cambiarHabilitacion(habilitada);
+    const actualizada = await prisma.sede.update({ where: { id: sedeId }, data: { habilitada: dominio.habilitada } });
     await registrarAuditoria({
       gimnasioId,
       usuarioId,

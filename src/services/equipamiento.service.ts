@@ -6,6 +6,7 @@ import { aFechaDb, ahoraLocal, fechaIso, horaTexto, minutosDeHora, sumarDias } f
 import { registrarAuditoria } from './auditoria.service';
 import { notificacionService } from './notificacion.service';
 import { tenant } from './tenant.service';
+import { Equipo, Incidencia, Mantenimiento } from '../domain';
 
 interface DatosEquipo {
   sedeId: number;
@@ -22,6 +23,13 @@ const fechaOpcional = (f?: string | null) => (f === undefined ? undefined : f ==
 
 /** Equipo no disponible: fuera de servicio, con service programado o dado de baja (RD22). */
 export const equipoDisponible = (estado: EstadoEquipo) => estado === 'OPERATIVO';
+
+/** Objeto de dominio del equipo guardado (fechas en texto). */
+const aEquipo = (e: { nombre: string; estado: EstadoEquipo; proximoService: Date | null; fechaBaja: Date | null }) =>
+  new Equipo({ nombre: e.nombre, estado: e.estado, proximoService: e.proximoService ? fechaIso(e.proximoService) : null, fechaBaja: e.fechaBaja ? fechaIso(e.fechaBaja) : null });
+
+const aIncidencia = (i: { id: number; descripcion: string; reportanteId: number; fecha: Date; estado: EstadoIncidencia; responsableId: number | null; equipoId: number; agrupadaEnId: number | null }) =>
+  new Incidencia(i);
 
 /** Inventario, incidencias y mantenimientos del equipamiento (RF8, RF21, RF22, RF23, RF34). */
 export const equipamientoService = {
@@ -78,21 +86,21 @@ export const equipamientoService = {
 
   /** RF21: el gimnasio actualiza la disponibilidad (la IA no detecta fallas, RD11). */
   async cambiarDisponibilidad(equipoId: number, r: Responsable, estado: Exclude<EstadoEquipo, 'DADO_DE_BAJA'>) {
-    const equipo = await tenant.equipo(equipoId, r.gimnasioId);
-    if (equipo.estado === 'DADO_DE_BAJA') throw reglaNegocio('EQUIPO_DADO_DE_BAJA', 'La baja del inventario es definitiva');
-    const actualizado = await prisma.equipo.update({ where: { id: equipoId }, data: { estado } });
+    const equipo = aEquipo(await tenant.equipo(equipoId, r.gimnasioId));
+    equipo.cambiarEstado(estado);
+    const actualizado = await prisma.equipo.update({ where: { id: equipoId }, data: { estado: equipo.estado } });
     await registrarAuditoria({ gimnasioId: r.gimnasioId, usuarioId: r.usuarioId, accion: 'DISPONIBILIDAD_EQUIPO', entidad: 'equipo', entidadId: equipoId, detalle: { estado } });
     return actualizado;
   },
 
   /** RD22: baja definitiva del inventario con fecha; conserva incidencias y mantenimientos. */
   async darDeBaja(equipoId: number, r: Responsable, datos: { fechaBaja?: string; motivo: string }) {
-    const equipo = await tenant.equipo(equipoId, r.gimnasioId);
-    if (equipo.estado === 'DADO_DE_BAJA') throw reglaNegocio('EQUIPO_DADO_DE_BAJA', 'El equipo ya fue dado de baja');
+    const equipo = aEquipo(await tenant.equipo(equipoId, r.gimnasioId));
     const fechaBaja = datos.fechaBaja ?? ahoraLocal().fecha;
+    equipo.darDeBaja(fechaBaja);
     const actualizado = await prisma.equipo.update({
       where: { id: equipoId },
-      data: { estado: 'DADO_DE_BAJA', fechaBaja: aFechaDb(fechaBaja) },
+      data: { estado: equipo.estado, fechaBaja: aFechaDb(equipo.fechaBaja!) },
     });
     await registrarAuditoria({
       gimnasioId: r.gimnasioId,
@@ -183,9 +191,11 @@ export const equipamientoService = {
       include: { reportante: true, equipo: true },
     });
     if (!incidencia) throw noEncontrado('Incidencia');
+    const dominio = aIncidencia(incidencia);
+    if (datos.estado) dominio.cambiarEstado(datos.estado);
     const actualizada = await prisma.incidencia.update({
       where: { id: incidenciaId },
-      data: { ...datos, responsableId: r.personalId },
+      data: { ...datos, ...(datos.estado ? { estado: dominio.estado } : {}), responsableId: r.personalId },
     });
     // Las incidencias agrupadas acompañan el estado de la principal.
     if (datos.estado) {
@@ -206,14 +216,14 @@ export const equipamientoService = {
       [incidenciaId, principalId].map((id) => prisma.incidencia.findFirst({ where: { id, equipo: { sede: { gimnasioId: r.gimnasioId } } } })),
     );
     if (!incidencia || !principal) throw noEncontrado('Incidencia');
-    if (incidencia.equipoId !== principal.equipoId) throw reglaNegocio('EQUIPOS_DISTINTOS', 'Solo se agrupan incidencias del mismo equipo');
-    if (principal.agrupadaEnId) throw reglaNegocio('PRINCIPAL_AGRUPADA', 'La incidencia principal ya está agrupada en otra');
+    const dominio = aIncidencia(incidencia);
+    dominio.agruparCon(aIncidencia(principal));
     return prisma.$transaction(async (tx) => {
       // Las que dependían de la incidencia agrupada pasan a la nueva principal.
-      await tx.incidencia.updateMany({ where: { agrupadaEnId: incidenciaId }, data: { agrupadaEnId: principalId } });
+      await tx.incidencia.updateMany({ where: { agrupadaEnId: incidenciaId }, data: { agrupadaEnId: dominio.agrupadaEn } });
       return tx.incidencia.update({
         where: { id: incidenciaId },
-        data: { agrupadaEnId: principalId, estado: principal.estado, responsableId: r.personalId },
+        data: { agrupadaEnId: dominio.agrupadaEn, estado: dominio.estado, responsableId: r.personalId },
       });
     });
   },
@@ -227,7 +237,8 @@ export const equipamientoService = {
     if (equipo.estado === 'DADO_DE_BAJA') throw reglaNegocio('EQUIPO_DADO_DE_BAJA', 'El equipo fue dado de baja');
     const inicio = new Date(datos.inicioProgramado);
     const fin = new Date(datos.finProgramado);
-    if (fin <= inicio) throw reglaNegocio('PERIODO_INVALIDO', 'El fin debe ser posterior al inicio');
+    // El constructor valida que el fin sea posterior al inicio (PERIODO_INVALIDO).
+    const programado = new Mantenimiento({ tipo: datos.tipo, inicioProgramado: inicio, finProgramado: fin, fechaRealizada: null, detalleRealizado: null, responsableId: r.personalId });
     const mantenimiento = await prisma.$transaction(async (tx) => {
       const creado = await tx.mantenimiento.create({
         data: {
@@ -244,7 +255,7 @@ export const equipamientoService = {
       return creado;
     });
     await registrarAuditoria({ gimnasioId: r.gimnasioId, usuarioId: r.usuarioId, accion: 'PROGRAMAR_MANTENIMIENTO', entidad: 'mantenimiento', entidadId: mantenimiento.id });
-    const avisados = await avisarSociosAfectados(equipo.id, equipo.nombre, equipo.sedeId, inicio, fin);
+    const avisados = await avisarSociosAfectados(equipo.id, equipo.nombre, equipo.sedeId, programado);
     return { mantenimiento, sociosAvisados: avisados };
   },
 
@@ -254,14 +265,15 @@ export const equipamientoService = {
       include: { equipo: true },
     });
     if (!mantenimiento) throw noEncontrado('Mantenimiento');
-    if (mantenimiento.estado === 'REALIZADO') throw reglaNegocio('YA_REALIZADO', 'El mantenimiento ya fue registrado como realizado');
+    const dominio = new Mantenimiento({ ...mantenimiento, realizado: mantenimiento.estado === 'REALIZADO' });
+    dominio.registrarRealizado(datos.fechaRealizada ? new Date(datos.fechaRealizada) : new Date(), datos.detalleRealizado);
     const actualizado = await prisma.$transaction(async (tx) => {
       const registro = await tx.mantenimiento.update({
         where: { id: mantenimientoId },
         data: {
           estado: 'REALIZADO',
-          fechaRealizada: datos.fechaRealizada ? new Date(datos.fechaRealizada) : new Date(),
-          detalleRealizado: datos.detalleRealizado,
+          fechaRealizada: dominio.fechaRealizada,
+          detalleRealizado: dominio.observaciones,
           responsableId: r.personalId,
         },
       });
@@ -299,7 +311,7 @@ export const equipamientoService = {
     const limiteRecambio = sumarDias(hoy, 90);
     const alertas: { equipoId: number; equipo: string; sede: string; tipo: 'SERVICE' | 'RECAMBIO'; fecha: string; vencida: boolean }[] = [];
     for (const e of equipos) {
-      if (e.proximoService && fechaIso(e.proximoService) <= limiteService) {
+      if (e.proximoService && aEquipo(e).requiereService(hoy, limiteService)) {
         alertas.push({ equipoId: e.id, equipo: e.nombre, sede: e.sede.nombre, tipo: 'SERVICE', fecha: fechaIso(e.proximoService), vencida: fechaIso(e.proximoService) < hoy });
       }
       if (e.fechaCompra && e.vidaUtilAnios) {
@@ -338,9 +350,12 @@ export const equipamientoService = {
  * RF34: avisa a los socios con un turno reservado durante el mantenimiento
  * cuya rutina vigente incluye un ejercicio que usa el equipo afectado.
  */
-async function avisarSociosAfectados(equipoId: number, nombreEquipo: string, sedeId: number, inicio: Date, fin: Date) {
+async function avisarSociosAfectados(equipoId: number, nombreEquipo: string, sedeId: number, mantenimiento: Mantenimiento) {
+  const inicio = mantenimiento.fechaProgramada;
+  const fin = mantenimiento.finProgramado;
   const desde = ahoraLocal(inicio).fecha;
   const hasta = ahoraLocal(fin).fecha;
+  const ventana = { desde, hasta, inicioMin: ahoraLocal(inicio).minutos, finMin: ahoraLocal(fin).minutos };
   const reservas = await prisma.reserva.findMany({
     where: {
       estado: 'RESERVADO',
@@ -353,11 +368,8 @@ async function avisarSociosAfectados(equipoId: number, nombreEquipo: string, sed
   for (const r of reservas) {
     const fecha = fechaIso(r.turno.fecha);
     // Solapamiento del turno con la ventana del mantenimiento en hora local.
-    const inicioTurno = minutosDeHora(r.turno.horaInicio);
-    const finTurno = minutosDeHora(r.turno.horaFin);
-    const ventanaInicio = fecha === desde ? ahoraLocal(inicio).minutos : 0;
-    const ventanaFin = fecha === hasta ? ahoraLocal(fin).minutos : 24 * 60;
-    if (inicioTurno >= ventanaFin || finTurno <= ventanaInicio || avisados.has(r.socioId)) continue;
+    const turno = { fecha, inicioMin: minutosDeHora(r.turno.horaInicio), finMin: minutosDeHora(r.turno.horaFin) };
+    if (!mantenimiento.afectaTurno(turno, ventana) || avisados.has(r.socioId)) continue;
     avisados.add(r.socioId);
     const mensaje = `El equipo ${nombreEquipo} estará en mantenimiento durante tu turno del ${fecha} a las ${horaTexto(r.turno.horaInicio)}. Podés consultar una variante en "Mi rutina".`;
     await notificacionService.notificar({ usuarioId: r.socio.usuarioId, tipo: 'EQUIPAMIENTO', mensaje });

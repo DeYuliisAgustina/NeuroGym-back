@@ -1,4 +1,5 @@
 import type { TipoPlanSocio } from '@prisma/client';
+import { ActualizacionPrecio, PlanSocio } from '../domain';
 import { prisma } from '../config/prisma';
 import { aNumero } from '../utils/dinero';
 import { noEncontrado, reglaNegocio } from '../utils/errores';
@@ -35,19 +36,22 @@ export const planService = {
     const vigenteDesde = datos.vigenteDesde ?? hoy;
     if (vigenteDesde < hoy) throw reglaNegocio('VIGENCIA_PASADA', 'La vigencia no puede ser anterior a hoy');
     const importeAnterior = await precioVigente(plan.id, vigenteDesde);
+    const planSocio = new PlanSocio({ tipo: plan.tipo, importeMensual: importeAnterior });
+    planSocio.actualizarPrecio(datos.importeNuevo);
+    const cambio = new ActualizacionPrecio({ precioAnterior: importeAnterior, precioNuevo: planSocio.precio, vigenteDesde, responsable: responsable.personalId });
 
     const actualizacion = await prisma.$transaction(async (tx) => {
       const registro = await tx.actualizacionPrecio.create({
         data: {
           planSocioId: plan.id,
-          importeAnterior,
-          importeNuevo: datos.importeNuevo,
-          vigenteDesde: aFechaDb(vigenteDesde),
+          importeAnterior: cambio.precioAnterior,
+          importeNuevo: cambio.precioNuevo,
+          vigenteDesde: aFechaDb(cambio.vigenteDesde),
           motivo: datos.motivo,
-          responsableId: responsable.personalId,
+          responsableId: cambio.responsable,
         },
       });
-      if (vigenteDesde <= hoy) await tx.planSocio.update({ where: { id: plan.id }, data: { importeMensual: datos.importeNuevo } });
+      if (vigenteDesde <= hoy) await tx.planSocio.update({ where: { id: plan.id }, data: { importeMensual: planSocio.precio } });
       return registro;
     });
     await registrarAuditoria({

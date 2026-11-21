@@ -8,8 +8,9 @@ import { hashPassword } from './auth.service';
 import { servicioEnvios } from './envioMensajes.service';
 import { generarCuotaSocio } from './cuotaGeneracion.service';
 import { verificarCupoSocios } from './gimnasio.service';
-import { bonificacionVigente, preciosDePlanes, preciosParaSocio } from './precios.service';
+import { aSocio, bonificacionVigente, preciosDePlanes, preciosParaSocio } from './precios.service';
 import { tenant } from './tenant.service';
+import { PlanSocio, Usuario } from '../domain';
 
 interface DatosSocio {
   email: string;
@@ -233,7 +234,10 @@ export const socioService = {
     if (socio.pendienteAlta) throw reglaNegocio('ALTA_PENDIENTE', 'El socio tiene el registro pendiente: confirmá o rechazá el alta');
     if (socio.usuario.activo === activo) return;
     if (activo) await verificarCupoSocios(gimnasioId);
-    await prisma.usuario.update({ where: { id: socio.usuarioId }, data: { activo } });
+    const usuario = new Usuario(socio.usuario);
+    if (activo) usuario.reactivar();
+    else usuario.desactivar();
+    await prisma.usuario.update({ where: { id: socio.usuarioId }, data: { activo: usuario.activo } });
     await registrarAuditoria({ gimnasioId, usuarioId, accion: activo ? 'REACTIVAR_SOCIO' : 'DESACTIVAR_SOCIO', entidad: 'socio', entidadId: socioId });
   },
 
@@ -256,8 +260,8 @@ export const socioService = {
   /** RF12: contratar o dar de baja el Plan Premium. */
   async cambiarPlan(socioId: number, gimnasioId: number, usuarioId: number, tipo: TipoPlanSocio) {
     const plan = await planDelGimnasio(gimnasioId, tipo);
-    const socio = await prisma.socio.findUniqueOrThrow({ where: { id: socioId } });
-    if (socio.planSocioId === plan.id) throw reglaNegocio('PLAN_SIN_CAMBIOS', `Ya tenés el Plan ${tipo === 'PREMIUM' ? 'Premium' : 'Básico'}`);
+    const socio = aSocio(await prisma.socio.findUniqueOrThrow({ where: { id: socioId }, include: { plan: true, usuario: true } }));
+    socio.cambiarPlan(new PlanSocio({ tipo: plan.tipo, importeMensual: Number(plan.importeMensual) }));
     await prisma.socio.update({ where: { id: socioId }, data: { planSocioId: plan.id } });
     await recalcularCuotaPendiente(socioId);
     await registrarAuditoria({ gimnasioId, usuarioId, accion: tipo === 'PREMIUM' ? 'ALTA_PREMIUM' : 'BAJA_PREMIUM', entidad: 'socio', entidadId: socioId });

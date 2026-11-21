@@ -8,6 +8,8 @@ import { noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal, fechaIso, horaTexto, minutosDeHora } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { tenant } from './tenant.service';
+import { Asistencia, CodigoQR } from '../domain';
+import { aSocio } from './precios.service';
 
 /** Personal autorizado que opera la recepción. */
 export interface PersonalRecepcion {
@@ -90,13 +92,15 @@ async function registrarIngreso(
   if (await asistenciaRepository.asistenciaDeReserva(datos.reservaId, tx)) {
     throw reglaNegocio('INGRESO_DUPLICADO', 'La reserva ya tiene una asistencia registrada');
   }
+  const ingreso = new Asistencia(datos);
+  ingreso.confirmar();
   const asistencia = await asistenciaRepository.registrarAsistencia(
     {
       reservaId: datos.reservaId,
       codigoQrId: datos.codigoQrId,
-      fechaHoraReal: datos.fechaHoraReal,
-      forma: datos.forma,
-      provisoria: datos.provisoria,
+      fechaHoraReal: ingreso.fechaHoraReal,
+      forma: ingreso.forma,
+      provisoria: ingreso.provisoria,
       motivo: datos.motivo,
       responsableId: datos.responsableId,
     },
@@ -108,7 +112,9 @@ async function registrarIngreso(
   let diaConstancia = false;
   if (!(await socioRepository.buscarDiaConstancia(datos.socioId, fecha, tx))) {
     await socioRepository.registrarDiaConstancia({ socioId: datos.socioId, asistenciaId: asistencia.id, fecha, puntos: env.puntosPorDia }, tx);
-    await socioRepository.sumarPuntos(datos.socioId, env.puntosPorDia, tx);
+    const socio = aSocio(await tx.socio.findUniqueOrThrow({ where: { id: datos.socioId }, include: { plan: true, usuario: true } }));
+    socio.sumarPuntos(env.puntosPorDia);
+    await socioRepository.sumarPuntos(datos.socioId, socio.saldoPuntos, tx);
     diaConstancia = true;
   }
   return { asistencia, diaConstancia };
@@ -137,7 +143,7 @@ export const asistenciaService = {
     if (!firmaValida(codigo)) throw qrInvalido();
     const registro = await socioRepository.buscarQrEmitido(codigo);
     if (!registro || registro.socio.sede.gimnasioId !== personal.gimnasioId) throw qrInvalido();
-    if (registro.expiraEn <= new Date() || !registro.socio.usuario.activo) {
+    if (!new CodigoQR(registro).estaVigente() || !registro.socio.usuario.activo) {
       await asistenciaRepository.registrarRechazo({ socioId: registro.socioId, motivo: 'QR vencido o inválido' });
       throw qrInvalido();
     }
@@ -184,7 +190,7 @@ export const asistenciaService = {
     const reserva = await asistenciaRepository.buscarReservaDelGimnasio(datos.reservaId, personal.gimnasioId);
     if (!reserva || reserva.estado !== 'RESERVADO') throw noEncontrado('Reserva');
     const codigo = await prisma.codigoQr.findFirst({ where: { id: datos.codigoQrId, socioId: reserva.socioId } });
-    if (!codigo || codigo.expiraEn.getTime() < Date.now() - MARGEN_CONFIRMACION_MS) throw qrInvalido();
+    if (!codigo || !new CodigoQR(codigo).estaVigente(new Date(), MARGEN_CONFIRMACION_MS)) throw qrInvalido();
     const ahora = new Date();
     const local = ahoraLocal(ahora);
     const { tolerancia } = await tolerancias(personal.gimnasioId);
