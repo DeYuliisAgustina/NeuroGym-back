@@ -25,7 +25,9 @@ import { detectarSenal } from '../../src/jobs/reglasRetencion';
  *  N19 return null (sin señal)
  *
  * Las condiciones compuestas (&&) se tratan como una sola decisión.
- * Los 7 casos recorren las 21 flechas (100 %) y, por lo tanto, todas las sentencias.
+ * Los casos C1 a C7 recorren las 21 flechas (100 %) y, por lo tanto, todas las sentencias.
+ * C8 a C14 prueban los valores límite de cada umbral (21 días; 50 %, 25 % y 70 % de la
+ * frecuencia habitual; frecuencia habitual justo por debajo de 2).
  */
 const casos = [
   { caso: 'C1', previas: 0, recientes: 0, diasDesdeUltima: null, flechas: 'F1 F2', esperado: null },
@@ -50,6 +52,29 @@ const casos = [
     esperado: { tipo: 'Frecuencia en descenso', nivel: 'BAJO', detalle: '3 asistencias en 14 días contra 5.0 habituales.' },
   },
   { caso: 'C7', previas: 20, recientes: 5, diasDesdeUltima: 1, flechas: 'F1 F3 F5 F15 F21', esperado: null },
+  // Valores límite: cada umbral de las decisiones, justo en el borde (un error de < por <= cambiaría el resultado).
+  {
+    caso: 'C8', previas: 8, recientes: 0, diasDesdeUltima: 21, flechas: 'F1 F3 F4 F7 F9 F10 F12',
+    esperado: { tipo: 'Ausencia prolongada', nivel: 'ALTO', detalle: 'Sin asistencias en 21 días; frecuencia habitual 2.0 cada 14 días.' },
+  },
+  {
+    caso: 'C9', previas: 8, recientes: 0, diasDesdeUltima: 20, flechas: 'F1 F3 F4 F7 F9 F11 F13',
+    esperado: { tipo: 'Ausencia prolongada', nivel: 'MEDIO', detalle: 'Sin asistencias en 20 días; frecuencia habitual 2.0 cada 14 días.' },
+  },
+  {
+    caso: 'C10', previas: 8, recientes: 1, diasDesdeUltima: 5, flechas: 'F1 F3 F5 F14 F17 F19',
+    esperado: { tipo: 'Frecuencia en descenso', nivel: 'MEDIO', detalle: '1 asistencias en 14 días contra 2.0 habituales.' },
+  },
+  { caso: 'C11', previas: 7, recientes: 1, diasDesdeUltima: 5, flechas: 'F1 F3 F5 F15 F21', esperado: null },
+  {
+    caso: 'C12', previas: 16, recientes: 1, diasDesdeUltima: 4, flechas: 'F1 F3 F5 F14 F16 F18',
+    esperado: { tipo: 'Frecuencia en descenso', nivel: 'ALTO', detalle: '1 asistencias en 14 días contra 4.0 habituales.' },
+  },
+  {
+    caso: 'C13', previas: 40, recientes: 7, diasDesdeUltima: 1, flechas: 'F1 F3 F5 F15 F20',
+    esperado: { tipo: 'Frecuencia en descenso', nivel: 'BAJO', detalle: '7 asistencias en 14 días contra 10.0 habituales.' },
+  },
+  { caso: 'C14', previas: 40, recientes: 8, diasDesdeUltima: 1, flechas: 'F1 F3 F5 F15 F21', esperado: null },
 ];
 
 describe('Caja blanca: detectarSenal con cubrimiento de flechas', () => {
