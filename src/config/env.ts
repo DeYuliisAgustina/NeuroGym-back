@@ -80,8 +80,6 @@ export const env = {
     },
   },
   ia: {
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
-    modelo: process.env.IA_MODELO ?? 'claude-opus-5-5',
     // Gemini (Google AI Studio): clave gratuita, sin tarjeta, con límites del nivel gratuito.
     geminiApiKey: process.env.GEMINI_API_KEY ?? '',
     geminiModelo: process.env.GEMINI_MODELO ?? 'gemini-3.5-flash',
@@ -90,16 +88,14 @@ export const env = {
       .split(',')
       .map((m) => m.trim())
       .filter(Boolean),
-    /** Proveedor elegido (IA_PROVEEDOR) o deducido de las claves cargadas. En los tests, siempre simulado. */
-    get proveedor(): 'GEMINI' | 'CLAUDE' | 'SIMULADO' {
-      const elegido = (process.env.IA_PROVEEDOR ?? '').toLowerCase();
+    /**
+     * Proveedor de IA para rutinas: Gemini si hay clave (y no se pidió la simulación con
+     * IA_PROVEEDOR=simulado); si no, la simulación local. En los tests, siempre simulado.
+     */
+    get proveedor(): 'GEMINI' | 'SIMULADO' {
       if (process.env.NODE_ENV === 'test') return 'SIMULADO';
-      if (elegido === 'gemini') return this.geminiApiKey ? 'GEMINI' : 'SIMULADO';
-      if (elegido === 'claude') return this.anthropicApiKey ? 'CLAUDE' : 'SIMULADO';
-      if (elegido === 'simulado') return 'SIMULADO';
-      if (this.geminiApiKey) return 'GEMINI';
-      if (this.anthropicApiKey) return 'CLAUDE';
-      return 'SIMULADO';
+      if ((process.env.IA_PROVEEDOR ?? '').toLowerCase() === 'simulado') return 'SIMULADO';
+      return this.geminiApiKey ? 'GEMINI' : 'SIMULADO';
     },
     get simulado() {
       return this.proveedor === 'SIMULADO';

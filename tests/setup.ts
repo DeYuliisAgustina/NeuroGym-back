@@ -15,5 +15,5 @@ process.env.DATABASE_URL ??= 'postgresql://sin-base@localhost:5432/sin_base_test
 // Las integraciones externas siempre se simulan en las pruebas automatizadas.
 process.env.MP_ACCESS_TOKEN = '';
 process.env.WHATSAPP_TOKEN = '';
-process.env.ANTHROPIC_API_KEY = '';
+process.env.GEMINI_API_KEY = '';
 process.env.UPLOADS_DIR = path.resolve(process.cwd(), 'coverage', 'uploads-test');

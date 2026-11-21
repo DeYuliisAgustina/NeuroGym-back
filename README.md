@@ -12,7 +12,7 @@ Trabajo Final de Ingeniería en Sistemas Informáticos — Universidad Abierta I
 | Persistencia | PostgreSQL 18, Prisma ORM 6.19 |
 | Seguridad | JWT (`jsonwebtoken`), contraseñas con `bcrypt`, `helmet`, CORS |
 | Validación | Zod 4 |
-| Integraciones | Mercado Pago (SDK oficial), WhatsApp Business Cloud API, Claude (`@anthropic-ai/sdk`), almacenamiento de objetos |
+| Integraciones | Mercado Pago (SDK oficial), WhatsApp Business Cloud API, Gemini (Google AI Studio), almacenamiento de objetos |
 | Tareas programadas | `node-cron` (ETL, cuotas, vencimientos, alertas) |
 | Reportes | `exceljs` (.xlsx) |
 | Pruebas | Vitest, Supertest |
@@ -58,7 +58,7 @@ NeuroGym-back/
 │   ├── integrations/
 │   │   ├── mercadopago/         # Gateway real + simulador
 │   │   ├── mensajeria/          # WhatsApp Cloud API + simulación
-│   │   ├── ia/                  # Claude + simulación
+│   │   ├── ia/                  # Gemini + simulación
 │   │   └── almacenamiento/      # Almacenamiento de objetos
 │   ├── jobs/                    # ETL de asistencia, reglas de retención, tareas programadas, supresión de datos
 │   ├── models/                  # Tipos de dominio (sesión, módulos)
@@ -146,7 +146,7 @@ Prefijo `/api`. Respuestas JSON; errores con `{ error, mensaje, detalle }`.
 |---|---|---|---|
 | Mercado Pago | `integrations/mercadopago/MercadoPagoApiGateway.ts`: pago único con órdenes de Checkout Pro (**API de Orders**, `POST /v1/orders`), débito automático con Suscripciones (PreApproval), baja del débito, validación `x-signature` y consulta de órdenes y preaprobaciones. Solo cuotas de socios y solo entorno de prueba | **Pendiente de prueba con credenciales de Mercado Pago Developers** (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `MP_TEST_PAYER_EMAIL`) y de una URL HTTPS para el webhook | Sin credenciales el pago en línea queda deshabilitado (no hay simulador); las pruebas automatizadas usan un doble de prueba |
 | WhatsApp | `integrations/mensajeria/WhatsAppCloudApi.ts` (Meta Graph API) | Modo de prueba con el número gratuito de Meta: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` y `WHATSAPP_TEST_RECIPIENT` (fuera de producción solo se envía a ese número). `npm run whatsapp:probar [-- <pagoId>]` verifica y reenvía un comprobante. Fuera de la ventana de 24 h Meta exige plantillas aprobadas | `MensajeriaSimulada` (no envía mensajes) |
-| IA | `integrations/ia/ServicioIAClaude.ts` (salidas estructuradas validadas con Zod) | **Pendiente de credencial** (`ANTHROPIC_API_KEY`) | `ServicioIASimulado` (reglas determinísticas) |
+| IA | `integrations/ia/ServicioIAGemini.ts` (API de Gemini por REST, salida JSON validada con Zod; modelo de respaldo si el principal está saturado) | Funcionando con clave del nivel gratuito de Google AI Studio (`GEMINI_API_KEY`) | `ServicioIASimulado` (reglas determinísticas, sin clave) |
 | Almacenamiento de objetos | `integrations/almacenamiento/AlmacenamientoObjetos.ts` | Almacenamiento local de desarrollo; proveedor S3 compatible pendiente | — |
 
 Ninguna integración real fue verificada todavía contra el servicio externo.

@@ -417,6 +417,11 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - La tarea «Levantar NeuroGym» ya no se ejecuta sola al abrir la carpeta, para no chocar con Run > «NeuroGym (backend + frontend)».
 - Para la defensa: 1) mandar «hola» al número del sandbox; 2) ejecutar «Preparar demo»; 3) pagar una cuota con un socio habilitado (`WHATSAPP_SOCIOS_PRUEBA`: socio3, socio5 y socio6).
 
+### IA de rutinas: solo Gemini (2026-11-21)
+
+- A pedido de la autora, que usa únicamente Gemini, se quitó el proveedor Claude: `ServicioIAClaude`, la dependencia `@anthropic-ai/sdk` y las variables `ANTHROPIC_API_KEY` e `IA_MODELO`. Quedan `ServicioIAGemini` (con clave) y `ServicioIASimulado` (sin clave y en las pruebas). `IA_PROVEEDOR=simulado` sigue forzando la simulación.
+- Verificado: backend 191 pruebas, frontend 24; rutina real con Gemini (17 ejercicios, 11 s). El diagrama de clases (10.5.7) se actualizó para mostrar solo las dos implementaciones.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**

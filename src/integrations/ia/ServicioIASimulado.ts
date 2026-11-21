@@ -16,7 +16,7 @@ const CARGAS: Record<string, { series: number; repeticiones: number; descansoSeg
 };
 
 /**
- * SIMULACIÓN del servicio de IA (sin ANTHROPIC_API_KEY), como prevé el TFI
+ * SIMULACIÓN del servicio de IA (sin GEMINI_API_KEY), como prevé el TFI
  * para el prototipo: arma una rutina determinística con reglas simples
  * repartiendo grupos musculares por día. No reemplaza a la integración real.
  */

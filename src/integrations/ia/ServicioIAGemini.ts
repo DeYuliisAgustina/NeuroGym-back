@@ -22,7 +22,7 @@ const URL_API = 'https://generativelanguage.googleapis.com/v1beta/models';
 /**
  * Integración con la API de Gemini (Google AI Studio) por REST, con salida JSON
  * restringida al esquema Zod y validada otra vez al recibirla. Requiere GEMINI_API_KEY.
- * Los mismos pedidos y validaciones que ServicioIAClaude: la IA solo sugiere.
+ * La IA solo sugiere: la respuesta se valida contra el catálogo disponible.
  */
 export class ServicioIAGemini implements ServicioIA {
   readonly descripcion = `Gemini (${env.ia.geminiModelo})`;
