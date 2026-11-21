@@ -29,5 +29,6 @@ socioRoutes.get('/cuota', cuotaController.detalle);
 socioRoutes.get('/debito/descuento', cuotaController.descuentoDebito);
 socioRoutes.delete('/debito', cuotaController.cancelarDebito);
 socioRoutes.get('/pagos', cuotaController.historial);
+socioRoutes.post('/pagos/verificacion', cuotaController.verificarPendientes);
 socioRoutes.get('/pagos/:id/comprobante', cuotaController.comprobante);
 socioRoutes.get('/pagos/:id/comprobante.pdf', cuotaController.comprobantePdf);

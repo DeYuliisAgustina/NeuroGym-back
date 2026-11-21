@@ -267,6 +267,29 @@ describe('CU-001 Abonar cuota mensual (Facade CuotaService + Strategy)', () => {
     expect((await request(app).post('/api/pagos/confirmacion').set(conToken(socio.token)).send({ pagoId: 'abc' })).status).toBe(400);
   });
 
+  it('al abrir «Cuotas y pagos» se confirma con Mercado Pago un pago que quedó pendiente (sin «Volver al sitio»)', async () => {
+    const socio = await crearSocio(g.sedeA.id);
+    const otro = await crearSocio(g.sedeA.id);
+    const cuota = await prisma.cuota.findFirstOrThrow({ where: { socioId: socio.id } });
+    const { body } = await request(app).post(`/api/cuotas/${cuota.id}/pagos`).set(conToken(socio.token)).send({ medio: 'PAGO_UNICO' });
+    const verificar = (token: string) => request(app).post('/api/socio/pagos/verificacion').set(conToken(token));
+
+    // Mercado Pago todavía no tiene resultado: no se registra nada.
+    expect((await verificar(socio.token)).body).toEqual({ revisados: 1, aprobados: 0, rechazados: 0 });
+    expect((await prisma.pago.findUniqueOrThrow({ where: { id: body.pagoId } })).estado).toBe('PENDIENTE');
+
+    // El socio pagó pero no volvió al sitio: al abrir la pantalla se registra el pago aprobado.
+    doble.actual.respuestas.set(`pago-${body.pagoId}`, { tipo: 'PAGO', pagoId: body.pagoId, referenciaExterna: 'PAY01TEST9003', aprobado: true });
+    expect((await verificar(otro.token)).body.aprobados).toBe(0);
+    expect((await verificar(socio.token)).body).toEqual({ revisados: 1, aprobados: 1, rechazados: 0 });
+    expect((await prisma.cuota.findUniqueOrThrow({ where: { id: cuota.id } })).estado).toBe('PAGADA');
+    expect(await prisma.comprobante.count({ where: { pagoId: body.pagoId } })).toBe(1);
+
+    // Volver a abrir la pantalla no repite nada: ya no hay pagos pendientes.
+    expect((await verificar(socio.token)).body).toEqual({ revisados: 0, aprobados: 0, rechazados: 0 });
+    expect(await prisma.pago.count({ where: { referenciaExterna: 'PAY01TEST9003' } })).toBe(1);
+  });
+
   it('la cuota del período se genera al dar de alta al socio', async () => {
     const socio = await crearSocio(g.sedeB.id);
     expect(await prisma.cuota.count({ where: { socioId: socio.id, periodo: ahoraLocal().fecha.slice(0, 7) } })).toBe(1);

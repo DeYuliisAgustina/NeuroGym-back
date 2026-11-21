@@ -18,6 +18,10 @@ export const cuotaController = {
   async detalle(req: Request, res: Response) {
     res.json(await cuotaService.obtenerDetalleCuota(socioDe(req).socioId));
   },
+  /** POST /api/socio/pagos/verificacion — al abrir «Cuotas y pagos», confirma con Mercado Pago los pagos pendientes. */
+  async verificarPendientes(req: Request, res: Response) {
+    res.json(await cuotaService.verificarPagosPendientes(socioDe(req).socioId));
+  },
   /** GET /api/cuotas/{id}/medios — CU-001-002. */
   async medios(req: Request, res: Response) {
     res.json(await cuotaService.obtenerImportesPorMedio(idParam(req.params.id), { socioId: socioDe(req).socioId }));

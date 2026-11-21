@@ -404,6 +404,12 @@ Regla de trabajo: solo herramientas y entornos gratuitos para desarrolladores (M
 - **Segundo plano (frontend):** el modal se cierra al confirmar; tarjeta de progreso en Mi rutina; el socio puede navegar; aviso al terminar y notificación del sistema (Notification API) si está en otra pestaña o ventana.
 - Pruebas: backend 190, frontend 24.
 
+### Pago único: confirmación sin depender de «Volver al sitio» (2026-11-20)
+
+- **Problema real (socio5, pago #79):** sin URL pública HTTPS, Mercado Pago no vuelve solo a NeuroGym (`auto_return` exige HTTPS). La autora pagó y no tocó «Volver al sitio»: Mercado Pago aprobó la orden, pero el pago quedó PENDIENTE en NeuroGym, sin comprobante. Se confirmó por el endpoint de retorno (`POST /api/pagos/confirmacion`): cuota 2026-11 PAGADA y comprobante NG-00000079. El WhatsApp con el PDF quedó FALLIDO porque no había túnel (`WHATSAPP_URL_PUBLICA` vacía).
+- **Solución:** `POST /api/socio/pagos/verificacion` (`CuotaService.verificarPagosPendientes`). Al abrir «Cuotas y pagos», el frontend la llama; el backend consulta a Mercado Pago los pagos únicos PENDIENTES del socio de los últimos 7 días (hasta 3, con 8 s de límite cada uno) y registra el resultado por el mismo camino idempotente (`registrarResultado`, origen CONCILIACION). Si confirma uno, se muestra «Pago registrado».
+- Pruebas: integración (sin resultado no registra; pago ajeno no se toca; aprobado → PAGADA y un comprobante; repetir no duplica). Backend 191, frontend 24.
+
 ### Pendiente
 
 1. **Pruebas que necesitan a la autora (cuentas y paneles personales):**

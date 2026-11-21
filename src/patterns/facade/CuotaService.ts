@@ -31,6 +31,11 @@ const MEDIOS: MedioPago[] = ['PAGO_UNICO', 'DEBITO_AUTOMATICO', 'EFECTIVO'];
 /** Período en curso ('AAAA-MM') en la zona horaria de los gimnasios. */
 const periodoActual = () => periodoDe(ahoraLocal().fecha);
 
+/** Corta una consulta externa que tarda demasiado (la pantalla no debe quedar esperando). */
+function conLimite<T>(promesa: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([promesa, new Promise<T>((_, rechazar) => setTimeout(() => rechazar(new Error(`sin respuesta en ${ms} ms`)), ms))]);
+}
+
 /** Mismo día del mes siguiente (máximo 28, válido en todos los meses): inicio de una suscripción diferida. */
 function mesSiguiente(desde = new Date()): Date {
   return new Date(Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth() + 1, Math.min(desde.getUTCDate(), 28), 15, 0, 0));
@@ -294,6 +299,35 @@ export class CuotaService {
     const resultado = await this.gateway.consultarOrdenDePago(pagoId, pago.fecha);
     if (!resultado || resultado.tipo !== 'PAGO' || resultado.pagoId !== pagoId) return { procesado: false, estado: 'PENDIENTE_DE_CONFIRMACION' };
     return { ...(await this.registrarResultado(resultado, 'RETORNO')), aprobado: resultado.aprobado };
+  }
+
+  /**
+   * Al abrir «Cuotas y pagos»: consulta a Mercado Pago los pagos únicos del socio
+   * que siguen PENDIENTES (últimos 7 días) y registra su resultado por el mismo
+   * camino idempotente del retorno. Así un pago aprobado no queda sin registrar
+   * si el socio no tocó «Volver al sitio». Si Mercado Pago no responde, no se
+   * registra nada y la pantalla se muestra igual.
+   */
+  async verificarPagosPendientes(socioId: number) {
+    const desde = new Date(Date.now() - 7 * 86_400_000);
+    const pendientes = await prisma.pago.findMany({
+      where: { medio: 'PAGO_UNICO', estado: 'PENDIENTE', fecha: { gte: desde }, cuota: { socioId } },
+      orderBy: { id: 'desc' },
+      take: 3,
+    });
+    const resultado = { revisados: pendientes.length, aprobados: 0, rechazados: 0 };
+    for (const pago of pendientes) {
+      try {
+        const op = await conLimite(this.gateway.consultarOrdenDePago(pago.id, pago.fecha), 8_000);
+        if (!op || op.tipo !== 'PAGO' || op.pagoId !== pago.id) continue;
+        await this.registrarResultado(op, 'CONCILIACION');
+        if (op.aprobado) resultado.aprobados++;
+        else resultado.rechazados++;
+      } catch (error) {
+        console.warn(`[Mercado Pago] No se pudo verificar el pago ${pago.id}:`, (error as Error).message);
+      }
+    }
+    return resultado;
   }
 
   /** Retorno desde la autorización del débito automático (preapproval_id). */
