@@ -26,6 +26,15 @@ describe('Errores HTTP de los middlewares', () => {
     }
   });
 
+  it('CORS: fuera de producción admite el frontend en cualquier puerto local y rechaza otros sitios', async () => {
+    for (const origen of ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173']) {
+      const r = await request(app).get('/api/salud').set('Origin', origen);
+      expect(r.headers['access-control-allow-origin']).toBe(origen);
+    }
+    const ajeno = await request(app).get('/api/salud').set('Origin', 'https://sitio-ajeno.example');
+    expect(ajeno.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
   it('un GET sin el prefijo /api redirige a la misma ruta bajo /api', async () => {
     const r = await request(app).get('/publico/planes-marketplace?x=1');
     expect(r.status).toBe(308);

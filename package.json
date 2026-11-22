@@ -9,6 +9,7 @@
     "node": ">=20.11"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
@@ -29,7 +30,8 @@
     "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
     "test:preparar": "tsx tests/preparar-base.ts",
-    "demo": "node scripts/preparar-demo.mjs"
+    "demo": "node scripts/preparar-demo.mjs",
+    "env:crear": "node scripts/crear-env.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

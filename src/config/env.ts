@@ -10,7 +10,11 @@ if (fs.existsSync(archivoEnv)) process.loadEnvFile(archivoEnv);
 
 function requerida(nombre: string): string {
   const valor = process.env[nombre];
-  if (!valor) throw new Error(`Falta la variable de entorno obligatoria ${nombre}`);
+  if (!valor) {
+    throw new Error(
+      `Falta la variable de entorno obligatoria ${nombre}. Creá el archivo .env con «npm run env:crear» (completa JWT_SECRET y QR_SECRET) y revisá DATABASE_URL.`,
+    );
+  }
   return valor;
 }
 

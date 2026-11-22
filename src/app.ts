@@ -5,6 +5,19 @@ import { env } from './config/env';
 import { manejarErrores } from './middlewares/errores.middleware';
 import { apiRoutes } from './routes';
 
+const origenesConfigurados = env.frontendUrl.split(',').map((o) => o.trim()).filter(Boolean);
+const origenLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+/**
+ * CORS: se admiten los orígenes de FRONTEND_URL. Fuera de producción también
+ * cualquier puerto de la propia computadora (localhost, 127.0.0.1), para que el
+ * frontend funcione aunque Vite use otro puerto porque el 5173 está ocupado.
+ */
+export function origenPermitido(origen: string | undefined, responder: (error: Error | null, permitido?: boolean) => void) {
+  const permitido = !origen || origenesConfigurados.includes(origen) || (env.nodeEnv !== 'production' && origenLocal.test(origen));
+  responder(null, permitido);
+}
+
 /**
  * Capa de lógica de negocio expuesta como API REST con JSON (arquitectura
  * cliente/servidor de tres capas): presentación (NeuroGym-front) → API → PostgreSQL.
@@ -14,7 +27,7 @@ export function crearApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-  app.use(cors({ origin: env.frontendUrl.split(','), credentials: false }));
+  app.use(cors({ origin: origenPermitido, credentials: false }));
   app.use(
     express.json({
       limit: '1mb',

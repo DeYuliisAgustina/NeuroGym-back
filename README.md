@@ -95,11 +95,14 @@ Requisitos: Node.js 20.11 o superior y PostgreSQL 15 o superior.
 
 ```bash
 npm install
-cp .env.example .env        # completar DATABASE_URL, JWT_SECRET y QR_SECRET
+npm run env:crear           # crea .env desde .env.example con JWT_SECRET y QR_SECRET aleatorios
+                            # luego completar DATABASE_URL con el usuario, la clave y la base de PostgreSQL
 npx prisma migrate deploy   # aplica las migraciones
 npm run db:seed             # datos ficticios de demostración
 npm run dev                 # http://localhost:3000/api
 ```
+
+Si el navegador muestra «Solicitud CORS sin éxito» con código de estado `(null)`, el backend no está respondiendo: revisá la terminal donde corre `npm run dev` (por ejemplo, una variable obligatoria sin completar o una `DATABASE_URL` incorrecta). Fuera de producción el backend acepta el frontend en cualquier puerto de `localhost` o `127.0.0.1`.
 
 Las cuentas de demostración del seed usan la contraseña `neurogym123` (o la definida en `SEED_PASSWORD`). Correos del gimnasio piloto: `admin@neurogym.test`, `recepcion@neurogym.test`, `cobranzas@neurogym.test`, `mantenimiento@neurogym.test`, `analista@neurogym.test`, socios `socio1@neurogym.test` a `socio28@neurogym.test` y profesionales `nutri1@neurogym.test`, `nutri2@neurogym.test` y `deporte1@neurogym.test`. El segundo gimnasio usa `@otrogym.test` (`admin@otrogym.test`, socios 29 a 36).
 
