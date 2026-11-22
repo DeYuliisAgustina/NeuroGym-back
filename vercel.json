@@ -1,3 +1,6 @@
 {
+  "functions": {
+    "api/index.ts": { "includeFiles": "node_modules/pdfkit/js/**" }
+  },
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
 }
