@@ -105,6 +105,11 @@ export const env = {
       return this.proveedor === 'SIMULADO';
     },
   },
+  /** Dominios de correo adicionales aceptados en el registro (además de los proveedores conocidos). */
+  correosDominiosExtra: (process.env.CORREOS_DOMINIOS_EXTRA ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean),
   almacenamiento: {
     directorioLocal: process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), 'uploads'),
     maxBytes: Number(process.env.UPLOAD_MAX_BYTES ?? 25 * 1024 * 1024),

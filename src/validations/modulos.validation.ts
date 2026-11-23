@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { emailSchema, passwordSchema } from './auth.validation';
+import { emailRegistroSchema, passwordSchema } from './auth.validation';
 import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, textoSchema } from './comunes.validation';
 import { NIVELES, OBJETIVOS } from '../services/rutina.service';
 
@@ -101,7 +101,7 @@ export const beneficioSchema = z.object({
 
 // ---------------- Marketplace ----------------
 export const registroProfesionalSchema = z.object({
-  email: emailSchema,
+  email: emailRegistroSchema,
   password: passwordSchema,
   nombre: textoSchema(100),
   apellido: textoSchema(100),
