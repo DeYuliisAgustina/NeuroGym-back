@@ -7,6 +7,7 @@ import { usuarioRepository } from '../repositories/usuario.repository';
 import { ErrorApp, noAutenticado, reglaNegocio } from '../utils/errores';
 import { Usuario } from '../domain';
 import { registrarAuditoria } from './auditoria.service';
+import { codigoNoValido, enviarCodigo, verificarCodigo } from './codigoEmail.service';
 
 const RONDAS_BCRYPT = 10;
 
@@ -66,6 +67,11 @@ export async function iniciarSesion(email: string, password: string, acceso: 'PU
   const valida = usuario ? await new Usuario(usuario).verificarPassword(password) : false;
   // Mensaje genérico: no revela si el correo existe.
   if (!usuario || !valida) throw new ErrorApp(401, 'CREDENCIALES_INVALIDAS', 'Correo o contraseña incorrectos');
+  // Quien se registró solo confirma su correo antes de ingresar; se le reenvía el código.
+  if (!usuario.emailVerificado) {
+    await enviarCodigo(usuario, 'VERIFICACION_EMAIL').catch(() => undefined);
+    throw new ErrorApp(403, 'EMAIL_NO_VERIFICADO', 'Confirmá tu correo con el código de 6 dígitos que te enviamos');
+  }
   // RF2: un socio autorregistrado no ingresa hasta que el gimnasio confirma su alta.
   if (usuario.socio?.pendienteAlta) throw new ErrorApp(403, 'ALTA_PENDIENTE', 'Tu registro está pendiente: el gimnasio tiene que confirmar tu alta');
   if (!usuario.activo) throw new ErrorApp(403, 'CUENTA_INACTIVA', 'La cuenta está desactivada');
@@ -96,6 +102,38 @@ export async function cambiarPassword(usuarioId: number, actual: string, nueva: 
   }
   await usuarioRepository.actualizarPassword(usuarioId, await hashPassword(nueva));
   await registrarAuditoria({ usuarioId, accion: 'CAMBIO_PASSWORD', entidad: 'usuario', entidadId: usuarioId });
+}
+
+/** Reenvía el código para confirmar el correo de una cuenta autorregistrada. No revela si el correo existe. */
+export async function reenviarVerificacion(email: string) {
+  const usuario = await usuarioRepository.buscarPorEmail(email);
+  if (usuario && !usuario.emailVerificado) await enviarCodigo(usuario, 'VERIFICACION_EMAIL');
+}
+
+/** Confirma el correo con el código recibido (una cuenta ya verificada no cambia). */
+export async function verificarEmail(email: string, codigo: string) {
+  const usuario = await usuarioRepository.buscarPorEmail(email);
+  if (!usuario) throw codigoNoValido();
+  if (usuario.emailVerificado) return;
+  await verificarCodigo(usuario.id, 'VERIFICACION_EMAIL', codigo);
+  await usuarioRepository.marcarEmailVerificado(usuario.id);
+  await registrarAuditoria({ usuarioId: usuario.id, accion: 'VERIFICACION_EMAIL', entidad: 'usuario', entidadId: usuario.id });
+}
+
+/** «Olvidé mi contraseña»: envía un código al correo si tiene una cuenta. No revela si existe. */
+export async function solicitarRecuperacion(email: string) {
+  const usuario = await usuarioRepository.buscarPorEmail(email);
+  if (usuario) await enviarCodigo(usuario, 'RECUPERACION_PASSWORD');
+}
+
+/** Cambia la contraseña con el código recibido; de paso queda confirmado el correo. */
+export async function recuperarPassword(email: string, codigo: string, nueva: string) {
+  const usuario = await usuarioRepository.buscarPorEmail(email);
+  if (!usuario) throw codigoNoValido();
+  await verificarCodigo(usuario.id, 'RECUPERACION_PASSWORD', codigo);
+  await usuarioRepository.actualizarPassword(usuario.id, await hashPassword(nueva));
+  if (!usuario.emailVerificado) await usuarioRepository.marcarEmailVerificado(usuario.id);
+  await registrarAuditoria({ usuarioId: usuario.id, accion: 'RECUPERACION_PASSWORD', entidad: 'usuario', entidadId: usuario.id });
 }
 
 /** Lista plana de permisos 'MODULO:ACCESO' recorriendo el árbol Composite. */

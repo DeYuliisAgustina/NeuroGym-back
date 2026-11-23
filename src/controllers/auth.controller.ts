@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
-import { cambioPasswordSchema, loginSchema } from '../validations/auth.validation';
+import { cambioPasswordSchema, loginSchema, recuperacionPasswordSchema, soloEmailSchema, verificacionEmailSchema } from '../validations/auth.validation';
 import { validar } from '../utils/validar';
 
 export const authController = {
@@ -23,6 +23,32 @@ export const authController = {
   async cambiarPassword(req: Request, res: Response) {
     const { actual, nueva } = validar(cambioPasswordSchema, req.body);
     await authService.cambiarPassword(req.usuario!.usuarioId, actual, nueva);
+    res.status(204).end();
+  },
+
+  /** Reenvía el código para confirmar el correo del autorregistro. */
+  async reenviarVerificacion(req: Request, res: Response) {
+    const { email } = validar(soloEmailSchema, req.body);
+    await authService.reenviarVerificacion(email);
+    res.status(204).end();
+  },
+
+  async verificarEmail(req: Request, res: Response) {
+    const { email, codigo } = validar(verificacionEmailSchema, req.body);
+    await authService.verificarEmail(email, codigo);
+    res.status(204).end();
+  },
+
+  /** «Olvidé mi contraseña»: envía el código por correo. */
+  async solicitarRecuperacion(req: Request, res: Response) {
+    const { email } = validar(soloEmailSchema, req.body);
+    await authService.solicitarRecuperacion(email);
+    res.status(204).end();
+  },
+
+  async recuperarPassword(req: Request, res: Response) {
+    const { email, codigo, nueva } = validar(recuperacionPasswordSchema, req.body);
+    await authService.recuperarPassword(email, codigo, nueva);
     res.status(204).end();
   },
 };

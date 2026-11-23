@@ -105,6 +105,18 @@ export const env = {
       return this.proveedor === 'SIMULADO';
     },
   },
+  correo: {
+    // Gmail por SMTP: la cuenta necesita verificación en dos pasos y una «contraseña de aplicación».
+    gmailUsuario: process.env.GMAIL_USUARIO ?? '',
+    gmailPasswordApp: (process.env.GMAIL_PASSWORD_APP ?? '').replace(/\s+/g, ''),
+    nombreRemitente: process.env.CORREO_REMITENTE ?? 'NeuroGym',
+    /** Gmail si hay credenciales; si no (y siempre en las pruebas), el código se muestra en la consola. */
+    get proveedor(): 'GMAIL' | 'SIMULADO' {
+      if (process.env.NODE_ENV === 'test') return 'SIMULADO';
+      if ((process.env.CORREO_PROVEEDOR ?? '').toLowerCase() === 'simulado') return 'SIMULADO';
+      return this.gmailUsuario && this.gmailPasswordApp ? 'GMAIL' : 'SIMULADO';
+    },
+  },
   /** Dominios de correo adicionales aceptados en el registro (además de los proveedores conocidos). */
   correosDominiosExtra: (process.env.CORREOS_DOMINIOS_EXTRA ?? '')
     .split(',')

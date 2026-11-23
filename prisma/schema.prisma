@@ -308,14 +308,16 @@ model Sede {
 
 /// Credenciales y datos comunes de socios, personal y profesionales (RNF3: hash bcrypt).
 model Usuario {
-  id           Int         @id @default(autoincrement()) @map("usuario_id")
-  email        String      @unique @db.VarChar(150)
-  passwordHash String      @map("password_hash") @db.VarChar(255)
-  nombre       String      @db.VarChar(100)
-  apellido     String      @db.VarChar(100)
-  tipo         TipoUsuario
-  activo       Boolean     @default(true)
-  fechaAlta    DateTime    @default(now()) @map("fecha_alta") @db.Timestamp(6)
+  id              Int         @id @default(autoincrement()) @map("usuario_id")
+  email           String      @unique @db.VarChar(150)
+  passwordHash    String      @map("password_hash") @db.VarChar(255)
+  nombre          String      @db.VarChar(100)
+  apellido        String      @db.VarChar(100)
+  tipo            TipoUsuario
+  activo          Boolean     @default(true)
+  fechaAlta       DateTime    @default(now()) @map("fecha_alta") @db.Timestamp(6)
+  /// Agregado: false mientras quien se registró solo no confirma su correo con el código.
+  emailVerificado Boolean     @default(true) @map("email_verificado")
 
   socio          Socio?
   personal       PersonalAdministrativo?
@@ -324,8 +326,35 @@ model Usuario {
   eventosTurno   EventoTurno[]
   auditorias     Auditoria[]
   enviosMensaje  EnvioMensaje[]
+  codigosEmail   CodigoEmail[]
 
   @@map("usuario")
+}
+
+/// Para qué se envió un código por correo.
+enum PropositoCodigo {
+  VERIFICACION_EMAIL
+  RECUPERACION_PASSWORD
+
+  @@map("proposito_codigo")
+}
+
+/// Agregado: código de 6 dígitos enviado por correo (verificación del registro y
+/// recuperación de la contraseña). Se guarda solo su hash; vence y admite pocos intentos.
+model CodigoEmail {
+  id         Int             @id @default(autoincrement()) @map("codigo_email_id")
+  usuarioId  Int             @map("usuario_id")
+  proposito  PropositoCodigo
+  codigoHash String          @map("codigo_hash") @db.VarChar(64)
+  vence      DateTime        @db.Timestamp(6)
+  intentos   Int             @default(0)
+  usado      Boolean         @default(false)
+  fechaAlta  DateTime        @default(now()) @map("fecha_alta") @db.Timestamp(6)
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, proposito])
+  @@map("codigo_email")
 }
 
 /// Catálogo de módulos; agrupa los permisos de cada módulo (grupo del patrón Composite).

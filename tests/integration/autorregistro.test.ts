@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { prisma } from '../../src/config/prisma';
-import { app, catalogo, conToken, crearGimnasio, crearSocio, limpiarBase } from './fixtures';
+import { app, catalogo, conToken, crearGimnasio, crearSocio, limpiarBase, verificarCorreo } from './fixtures';
 
 /** RF2: autorregistro del socio (pre-registro) y confirmación del alta por el gimnasio. */
 describe('Autorregistro del socio', () => {
@@ -42,6 +42,12 @@ describe('Autorregistro del socio', () => {
     expect(socio.usuario.activo).toBe(false);
     expect(socio.plan.tipo).toBe('BASICO');
     expect(socio.cuotas).toHaveLength(0);
+    // Primero confirma el correo con el código; después espera el alta del gimnasio.
+    expect(socio.usuario.emailVerificado).toBe(false);
+    const sinVerificar = await request(app).post('/api/auth/login').send({ email: 'nuevo1@prueba.test', password: 'Registro123' });
+    expect(sinVerificar.status).toBe(403);
+    expect(sinVerificar.body.error).toBe('EMAIL_NO_VERIFICADO');
+    await verificarCorreo('nuevo1@prueba.test');
     const login = await request(app).post('/api/auth/login').send({ email: 'nuevo1@prueba.test', password: 'Registro123' });
     expect(login.status).toBe(403);
     expect(login.body.error).toBe('ALTA_PENDIENTE');
@@ -78,6 +84,7 @@ describe('Autorregistro del socio', () => {
     await request(app).post('/api/auth/registro').send(datos('nuevo2@prueba.test', a.sedeA.id));
     const socio = await prisma.socio.findFirstOrThrow({ where: { usuario: { email: 'nuevo2@prueba.test' } } });
     expect((await request(app).patch(`/api/admin/socios/${socio.id}/alta`).set(conToken(a.admin.token)).send({ aprobar: false })).status).toBe(204);
+    await verificarCorreo('nuevo2@prueba.test');
     const login = await request(app).post('/api/auth/login').send({ email: 'nuevo2@prueba.test', password: 'Registro123' });
     expect(login.status).toBe(403);
     expect(login.body.error).toBe('CUENTA_INACTIVA');

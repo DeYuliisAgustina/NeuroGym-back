@@ -29,4 +29,8 @@ export const usuarioRepository = {
   actualizarPassword(usuarioId: number, passwordHash: string) {
     return prisma.usuario.update({ where: { id: usuarioId }, data: { passwordHash } });
   },
+
+  marcarEmailVerificado(usuarioId: number) {
+    return prisma.usuario.update({ where: { id: usuarioId }, data: { emailVerificado: true } });
+  },
 };

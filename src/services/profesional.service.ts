@@ -5,7 +5,8 @@ import { aNumero } from '../utils/dinero';
 import { conflicto, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aHoraDb, horaTexto } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
-import { firmarToken, hashPassword, obtenerContexto, describirSesion } from './auth.service';
+import { hashPassword } from './auth.service';
+import { enviarCodigo } from './codigoEmail.service';
 import { Profesional } from '../domain';
 
 interface RegistroProfesional {
@@ -66,14 +67,16 @@ export const profesionalService = {
             nombre: datos.nombre,
             apellido: datos.apellido,
             tipo: 'PROFESIONAL' as const,
+            emailVerificado: false,
             passwordHash: await hashPassword(datos.password),
           },
         },
       },
     });
     await registrarAuditoria({ usuarioId: profesional.usuarioId, accion: 'REGISTRO_PROFESIONAL', entidad: 'profesional', entidadId: profesional.id });
-    const contexto = await obtenerContexto(profesional.usuarioId);
-    return { token: firmarToken({ sub: profesional.usuarioId, tipo: 'PROFESIONAL' }), usuario: describirSesion(contexto) };
+    // Ingresa después de confirmar el correo con el código (si el envío falla, puede pedir otro).
+    await enviarCodigo({ id: profesional.usuarioId, email: datos.email, nombre: datos.nombre }, 'VERIFICACION_EMAIL').catch(() => undefined);
+    return { mensaje: 'Te enviamos un código a tu correo para confirmarlo.', verificacionPendiente: true };
   },
 
   async perfil(profesionalId: number) {

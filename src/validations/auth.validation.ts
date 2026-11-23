@@ -35,3 +35,11 @@ export const registroSocioSchema = z.object({
   sedeId: idSchema,
   consentimientoDatos: z.literal(true, { message: 'Se requiere el consentimiento para el tratamiento de datos' }),
 });
+
+const codigoSchema = z.string().trim().regex(/^\d{6}$/, 'Ingresá el código de 6 dígitos');
+
+export const soloEmailSchema = z.object({ email: emailSchema });
+
+export const verificacionEmailSchema = z.object({ email: emailSchema, codigo: codigoSchema });
+
+export const recuperacionPasswordSchema = z.object({ email: emailSchema, codigo: codigoSchema, nueva: passwordSchema });

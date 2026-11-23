@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import request from 'supertest';
 import { crearApp } from '../../src/app';
 import { prisma } from '../../src/config/prisma';
+import { servicioCorreo, type CorreoSimulado } from '../../src/integrations/correo';
 import { CODIGOS_MODULO, MODULOS } from '../../src/models/modulos';
 import { generarCuotaSocio } from '../../src/services/cuotaGeneracion.service';
 import { aFechaDb, aHoraDb, ahoraLocal } from '../../src/utils/fechas';
@@ -117,3 +118,17 @@ export async function token(email: string, administrativo = false): Promise<stri
 }
 
 export const conToken = (t: string) => ({ Authorization: `Bearer ${t}` });
+
+/** Último código de 6 dígitos enviado por correo a esa dirección (el correo es simulado en las pruebas). */
+export function ultimoCodigo(email: string): string {
+  const enviados = (servicioCorreo as CorreoSimulado).enviados.filter((c) => c.para === email);
+  const codigo = enviados.at(-1)?.texto.match(/\b(\d{6})\b/)?.[1];
+  if (!codigo) throw new Error(`No se envió ningún código a ${email}`);
+  return codigo;
+}
+
+/** Confirma el correo de una cuenta autorregistrada con el código enviado. */
+export async function verificarCorreo(email: string) {
+  const r = await request(app).post('/api/auth/verificacion').send({ email, codigo: ultimoCodigo(email) });
+  if (r.status !== 204) throw new Error(`No se pudo verificar ${email}: ${r.status} ${JSON.stringify(r.body)}`);
+}

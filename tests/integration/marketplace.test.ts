@@ -2,7 +2,7 @@ import request from 'supertest';
 import { prisma } from '../../src/config/prisma';
 import { recordarTurnosProfesionales } from '../../src/services/turnoProfesional.service';
 import { aFechaDb, aHoraDb, ahoraLocal, DIAS_SEMANA, diaSemanaIso, sumarDias } from '../../src/utils/fechas';
-import { app, catalogo, conToken, crearGimnasio, crearSocio, limpiarBase } from './fixtures';
+import { app, catalogo, conToken, crearGimnasio, crearSocio, limpiarBase, verificarCorreo } from './fixtures';
 
 describe('Marketplace de profesionales y patrón Observer (RD13, RD16, RD17)', () => {
   let g: Awaited<ReturnType<typeof crearGimnasio>>;
@@ -26,7 +26,11 @@ describe('Marketplace de profesionales y patrón Observer (RD13, RD16, RD17)', (
       consentimientoDatos: true,
     });
     expect(registro.status).toBe(201);
-    profesional = { token: registro.body.token, id: registro.body.usuario.profesionalId, usuarioId: registro.body.usuario.usuarioId };
+    // Ingresa después de confirmar el correo con el código.
+    expect(registro.body.token).toBeUndefined();
+    await verificarCorreo('nutri@prueba.test');
+    const login = await request(app).post('/api/auth/login').send({ email: 'nutri@prueba.test', password: 'Prueba1234' });
+    profesional = { token: login.body.token, id: login.body.usuario.profesionalId, usuarioId: login.body.usuario.usuarioId };
     const h = conToken(profesional.token);
     await request(app).post('/api/profesional/disponibilidad').set(h).send({ diaSemana: DIAS_SEMANA[diaSemanaIso(manana) - 1], horaInicio: '09:00', horaFin: '12:00', duracionConsultaMin: 60 });
     metodoPagoId = (await request(app).post('/api/profesional/metodos-pago').set(h).send({ tipo: 'PARTICULAR' })).body.id;

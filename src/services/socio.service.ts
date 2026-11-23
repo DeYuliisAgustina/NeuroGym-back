@@ -5,6 +5,7 @@ import { conflicto, noEncontrado, reglaNegocio } from '../utils/errores';
 import { ahoraLocal, fechaIso } from '../utils/fechas';
 import { registrarAuditoria } from './auditoria.service';
 import { hashPassword } from './auth.service';
+import { enviarCodigo } from './codigoEmail.service';
 import { servicioEnvios } from './envioMensajes.service';
 import { generarCuotaSocio } from './cuotaGeneracion.service';
 import { verificarCupoSocios } from './gimnasio.service';
@@ -189,13 +190,16 @@ export const socioService = {
             apellido: datos.apellido,
             tipo: 'SOCIO' as const,
             activo: false,
+            emailVerificado: false,
             passwordHash: await hashPassword(datos.password),
           },
         },
       },
     });
     await registrarAuditoria({ gimnasioId: sede.gimnasioId, usuarioId: socio.usuarioId, accion: 'PREREGISTRO_SOCIO', entidad: 'socio', entidadId: socio.id });
-    return { mensaje: 'Registro recibido. Tu gimnasio va a confirmar tu alta y te avisamos para que puedas ingresar.' };
+    // Código para confirmar el correo; si el envío falla, se puede pedir otro desde la pantalla.
+    await enviarCodigo({ id: socio.usuarioId, email: datos.email, nombre: datos.nombre }, 'VERIFICACION_EMAIL').catch(() => undefined);
+    return { mensaje: 'Registro recibido. Tu gimnasio va a confirmar tu alta y te avisamos para que puedas ingresar.', verificacionPendiente: true };
   },
 
   /** RF2/RF16: el personal confirma el alta (activa la cuenta y genera la cuota) o rechaza el pre-registro. */
