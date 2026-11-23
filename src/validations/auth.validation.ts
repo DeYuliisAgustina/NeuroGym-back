@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { correoAceptado, MENSAJE_CORREO_NO_ACEPTADO } from '../utils/correos';
-import { idSchema, telefonoSchema, textoSchema } from './comunes.validation';
+import { idSchema, nombrePersonaSchema, telefonoSchema, textoSchema } from './comunes.validation';
 
 export const emailSchema = z.string().trim().toLowerCase().email('Correo electrónico inválido').max(150);
 
@@ -22,15 +22,15 @@ export const cambioPasswordSchema = z.object({
   nueva: passwordSchema,
 });
 
-/** RF2: autorregistro (pre-registro) del socio desde el ingreso público. */
 /** Correo del autorregistro: además del formato, debe ser de un proveedor reconocido. */
 export const emailRegistroSchema = emailSchema.refine(correoAceptado, MENSAJE_CORREO_NO_ACEPTADO);
 
+/** RF2: autorregistro (pre-registro) del socio desde el ingreso público. */
 export const registroSocioSchema = z.object({
   email: emailRegistroSchema,
   password: passwordSchema,
-  nombre: textoSchema(100),
-  apellido: textoSchema(100),
+  nombre: nombrePersonaSchema,
+  apellido: nombrePersonaSchema,
   telefono: telefonoSchema,
   sedeId: idSchema,
   consentimientoDatos: z.literal(true, { message: 'Se requiere el consentimiento para el tratamiento de datos' }),

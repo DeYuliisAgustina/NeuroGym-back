@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { emailRegistroSchema, passwordSchema } from './auth.validation';
-import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, textoSchema } from './comunes.validation';
+import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, nombrePersonaSchema, textoSchema } from './comunes.validation';
 import { NIVELES, OBJETIVOS } from '../services/rutina.service';
 
 // ---------------- Equipamiento ----------------
@@ -103,8 +103,8 @@ export const beneficioSchema = z.object({
 export const registroProfesionalSchema = z.object({
   email: emailRegistroSchema,
   password: passwordSchema,
-  nombre: textoSchema(100),
-  apellido: textoSchema(100),
+  nombre: nombrePersonaSchema,
+  apellido: nombrePersonaSchema,
   especialidad: z.enum(['NUTRICION', 'DEPORTOLOGIA']),
   modalidadAtencion: z.enum(['ONLINE', 'PRESENCIAL', 'ONLINE_Y_PRESENCIAL']),
   valorConsulta: importeSchema,
