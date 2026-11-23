@@ -277,7 +277,7 @@ async function main() {
               email: `socio${n}@${gimnasio.id === piloto.gimnasio.id ? 'neurogym.test' : 'otrogym.test'}`,
               passwordHash: hash,
               nombre: elegir(NOMBRES),
-              apellido: `${elegir(APELLIDOS)} ${n}`,
+              apellido: elegir(APELLIDOS),
               tipo: 'SOCIO',
               fechaAlta: new Date(Date.now() - 120 * 86400000),
             },

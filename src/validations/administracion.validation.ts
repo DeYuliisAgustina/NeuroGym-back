@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CODIGOS_MODULO } from '../models/modulos';
 import { emailSchema } from './auth.validation';
-import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, telefonoSchema, textoSchema } from './comunes.validation';
+import { booleanoQuery, fechaSchema, horaSchema, idSchema, importeSchema, nombrePersonaSchema, telefonoSchema, textoSchema } from './comunes.validation';
 
 export const politicasSchema = z
   .object({
@@ -31,8 +31,8 @@ export const rolSchema = z.object({
 
 export const personalSchema = z.object({
   email: emailSchema,
-  nombre: textoSchema(100),
-  apellido: textoSchema(100),
+  nombre: nombrePersonaSchema,
+  apellido: nombrePersonaSchema,
   rolId: idSchema,
 });
 
@@ -46,8 +46,8 @@ export const precioSchema = z.object({
 
 export const socioSchema = z.object({
   email: emailSchema,
-  nombre: textoSchema(100),
-  apellido: textoSchema(100),
+  nombre: nombrePersonaSchema,
+  apellido: nombrePersonaSchema,
   telefono: telefonoSchema,
   sedeId: idSchema,
   plan: z.enum(['BASICO', 'PREMIUM']),

@@ -114,8 +114,8 @@ export const registroProfesionalSchema = z.object({
 });
 export const perfilProfesionalSchema = z
   .object({
-    nombre: textoSchema(100),
-    apellido: textoSchema(100),
+    nombre: nombrePersonaSchema,
+    apellido: nombrePersonaSchema,
     modalidadAtencion: z.enum(['ONLINE', 'PRESENCIAL', 'ONLINE_Y_PRESENCIAL']),
     valorConsulta: importeSchema,
     publicacionPausada: z.boolean(),

@@ -138,4 +138,10 @@ describe('Marketplace de profesionales y patrón Observer (RD13, RD16, RD17)', (
     expect((await solicitar(socio.token, '09:00')).status).toBe(404);
     await request(app).put('/api/profesional/perfil').set(conToken(profesional.token)).send({ publicacionPausada: false });
   });
+
+  it('el perfil del profesional rechaza un nombre con números', async () => {
+    const r = await request(app).put('/api/profesional/perfil').set(conToken(profesional.token)).send({ nombre: 'Laura1' });
+    expect(r.status).toBe(400);
+    expect(r.body.detalle).toContainEqual({ campo: 'nombre', mensaje: 'Usá solo letras, sin números ni símbolos' });
+  });
 });

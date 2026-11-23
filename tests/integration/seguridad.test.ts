@@ -64,7 +64,10 @@ describe('Seguridad, permisos (Composite) y aislamiento multiempresa', () => {
     const h = conToken(a.admin.token);
     const rol = await request(app).post('/api/admin/roles').set(h).send({ nombre: 'Cobranzas', permisos: [{ modulo: 'COBROS', acceso: 'GESTION' }] });
     expect(rol.status).toBe(201);
-    const alta = await request(app).post('/api/admin/personal').set(h).send({ email: 'cobranzas@prueba.test', nombre: 'C', apellido: 'D', rolId: rol.body.id });
+    const conNumeros = await request(app).post('/api/admin/personal').set(h).send({ email: 'cobranzas@prueba.test', nombre: 'Carla2', apellido: 'Díaz', rolId: rol.body.id });
+    expect(conNumeros.status).toBe(400);
+    expect(conNumeros.body.detalle).toEqual([{ campo: 'nombre', mensaje: 'Usá solo letras, sin números ni símbolos' }]);
+    const alta = await request(app).post('/api/admin/personal').set(h).send({ email: 'cobranzas@prueba.test', nombre: 'Carla', apellido: 'Díaz', rolId: rol.body.id });
     expect(alta.status).toBe(201);
     const login = await request(app).post('/api/auth/admin/login').send({ email: 'cobranzas@prueba.test', password: alta.body.passwordTemporal });
     expect(login.body.usuario.permisos).toContain('COBROS:GESTION');
@@ -103,6 +106,16 @@ describe('Seguridad, permisos (Composite) y aislamiento multiempresa', () => {
     const r = await request(app).post('/api/admin/socios').set(conToken(a.admin.token)).send({ email: 'no-es-correo', consentimientoDatos: false });
     expect(r.status).toBe(400);
     expect(r.body.detalle.map((d: { campo: string }) => d.campo)).toEqual(expect.arrayContaining(['email', 'nombre', 'consentimientoDatos']));
+  });
+
+  it('nombre y apellido de socios y profesionales: solo letras (alta, edición y perfil)', async () => {
+    const h = conToken(a.admin.token);
+    const alta = await request(app).post('/api/admin/socios').set(h).send({ email: 'nuevo@gmail.com', nombre: 'Juan', apellido: 'Pérez 3' });
+    expect(alta.status).toBe(400);
+    expect(alta.body.detalle).toContainEqual({ campo: 'apellido', mensaje: 'Usá solo letras, sin números ni símbolos' });
+    const socio = await crearSocio(a.sedeA.id);
+    expect((await request(app).put(`/api/admin/socios/${socio.id}`).set(h).send({ nombre: 'Ana#' })).status).toBe(400);
+    expect((await request(app).put(`/api/admin/socios/${socio.id}`).set(h).send({ nombre: 'María José', apellido: "D'Angelo" })).status).toBe(200);
   });
 
   it('auditoría: registra las operaciones relevantes', async () => {
