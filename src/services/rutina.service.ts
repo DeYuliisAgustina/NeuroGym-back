@@ -4,7 +4,9 @@ import { rutinaRepository } from '../repositories/rutina.repository';
 import { aNumero } from '../utils/dinero';
 import { ErrorApp, noEncontrado, reglaNegocio } from '../utils/errores';
 import { aFechaDb, ahoraLocal } from '../utils/fechas';
+import { registrarAuditoria } from './auditoria.service';
 import { equipoDisponible } from './equipamiento.service';
+import { tenant } from './tenant.service';
 import { Ejercicio, EjercicioRutina, Rutina } from '../domain';
 
 type SocioCtx = { socioId: number; sedeId: number };
@@ -214,5 +216,60 @@ export const rutinaService = {
 
   historial(socioId: number) {
     return rutinaRepository.buscarEntrenamientos(socioId);
+  },
+};
+
+type PersonalCtx = { gimnasioId: number; usuarioId: number };
+
+/**
+ * RF5: el personal autorizado (permiso SOCIOS) consulta, genera con IA y edita la
+ * rutina de un socio de su gimnasio. Usa las mismas operaciones que el socio y deja
+ * registrado en la auditoría quién hizo cada cambio. Las variantes las decide el
+ * socio (RD11), por eso no se ofrecen acá.
+ */
+export const rutinaPersonalService = {
+  /** Socio del gimnasio del personal (RNF4: nunca de otro gimnasio). */
+  async socioDelGimnasio(personal: PersonalCtx, socioId: number, paraModificar = false): Promise<SocioCtx> {
+    const socio = await tenant.socio(socioId, personal.gimnasioId);
+    // RD20: con la cuenta desactivada (o el alta pendiente) no se registran operaciones nuevas.
+    if (paraModificar && (!socio.usuario.activo || socio.pendienteAlta)) {
+      throw reglaNegocio('SOCIO_INACTIVO', 'El socio no está activo: no se puede modificar su rutina');
+    }
+    return { socioId: socio.id, sedeId: socio.sedeId };
+  },
+
+  async obtenerRutina(personal: PersonalCtx, socioId: number) {
+    return rutinaService.obtenerRutina(await this.socioDelGimnasio(personal, socioId));
+  },
+
+  async generarRutina(personal: PersonalCtx, socioId: number, preferencias: PreferenciasRutina) {
+    const socio = await this.socioDelGimnasio(personal, socioId, true);
+    await rutinaService.generarRutina(socio, preferencias);
+    // Como en «Mi rutina», quedan guardados el objetivo, la experiencia y los días (las zonas a evitar no).
+    await rutinaService.registrarPreferencias(socio, preferencias);
+    const resultado = await rutinaService.obtenerRutina(socio);
+    await registrarAuditoria({
+      gimnasioId: personal.gimnasioId,
+      usuarioId: personal.usuarioId,
+      accion: 'RUTINA_GENERADA_POR_PERSONAL',
+      entidad: 'rutina',
+      entidadId: resultado.rutina?.id ?? null,
+      detalle: { socioId, objetivo: preferencias.objetivo, nivel: preferencias.nivel, diasPorSemana: preferencias.diasPorSemana },
+    });
+    return resultado;
+  },
+
+  async actualizarEjercicio(personal: PersonalCtx, socioId: number, ejercicioRutinaId: number, datos: Parameters<typeof rutinaService.actualizarEjercicio>[2]) {
+    const socio = await this.socioDelGimnasio(personal, socioId, true);
+    const resultado = await rutinaService.actualizarEjercicio(socio, ejercicioRutinaId, datos);
+    await registrarAuditoria({
+      gimnasioId: personal.gimnasioId,
+      usuarioId: personal.usuarioId,
+      accion: 'RUTINA_EDITADA_POR_PERSONAL',
+      entidad: 'ejercicio_rutina',
+      entidadId: ejercicioRutinaId,
+      detalle: { socioId, ...datos },
+    });
+    return resultado;
   },
 };

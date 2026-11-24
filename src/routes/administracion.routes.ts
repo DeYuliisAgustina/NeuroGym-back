@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { administracionController as c } from '../controllers/administracion.controller';
 import { asistenciaController } from '../controllers/asistencia.controller';
 import { cuotaController } from '../controllers/cuota.controller';
+import { rutinaPersonalController as rutinaSocio } from '../controllers/rutina.controller';
 import { socioController } from '../controllers/socio.controller';
 import { turnoController } from '../controllers/turno.controller';
 import { autenticar, soloPerfiles } from '../middlewares/autenticacion.middleware';
@@ -44,6 +45,10 @@ administracionRoutes.get('/socios/:id', permiso('SOCIOS', 'CONSULTA'), socioCont
 administracionRoutes.put('/socios/:id', permiso('SOCIOS', 'GESTION'), socioController.actualizar);
 administracionRoutes.patch('/socios/:id/estado', permiso('SOCIOS', 'GESTION'), socioController.cambiarEstado);
 administracionRoutes.patch('/socios/:id/alta', permiso('SOCIOS', 'GESTION'), socioController.resolverAlta);
+// RF5: rutina del socio generada con IA o editada por el personal autorizado.
+administracionRoutes.get('/socios/:id/rutina', permiso('SOCIOS', 'CONSULTA'), rutinaSocio.obtenerRutina);
+administracionRoutes.post('/socios/:id/rutina', permiso('SOCIOS', 'GESTION'), rutinaSocio.generarRutina);
+administracionRoutes.put('/socios/:id/rutina/ejercicios/:ejercicioId', permiso('SOCIOS', 'GESTION'), rutinaSocio.actualizarEjercicio);
 
 // Horarios y cupos de turnos (RF16, RD23)
 administracionRoutes.get('/turnos', permiso('SEDES', 'CONSULTA'), turnoController.listar);

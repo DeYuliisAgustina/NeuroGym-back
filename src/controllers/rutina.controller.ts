@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { NIVELES, OBJETIVOS, rutinaService } from '../services/rutina.service';
-import { socioDe } from '../utils/contexto';
+import { NIVELES, OBJETIVOS, rutinaPersonalService, rutinaService } from '../services/rutina.service';
+import { personalDe, socioDe } from '../utils/contexto';
 import { idParam, validar } from '../utils/validar';
 import { aplicarVarianteSchema, edicionEjercicioSchema, entrenamientoSchema, preferenciasSchema } from '../validations/modulos.validation';
 
@@ -51,5 +51,22 @@ export const rutinaController = {
   /** GET /api/entrenamientos — historial de entrenamientos. */
   async historial(req: Request, res: Response) {
     res.json(await rutinaService.historial(socioDe(req).socioId));
+  },
+};
+
+/** RF5: el personal autorizado (permiso SOCIOS) consulta, genera con IA y edita la rutina de un socio. */
+export const rutinaPersonalController = {
+  /** GET /api/admin/socios/{id}/rutina */
+  async obtenerRutina(req: Request, res: Response) {
+    res.json(await rutinaPersonalService.obtenerRutina(personalDe(req), idParam(req.params.id)));
+  },
+  /** POST /api/admin/socios/{id}/rutina — genera con IA y reemplaza la vigente. */
+  async generarRutina(req: Request, res: Response) {
+    res.status(201).json(await rutinaPersonalService.generarRutina(personalDe(req), idParam(req.params.id), validar(preferenciasSchema, req.body)));
+  },
+  /** PUT /api/admin/socios/{id}/rutina/ejercicios/{ejercicioId} — edición manual. */
+  async actualizarEjercicio(req: Request, res: Response) {
+    const datos = validar(edicionEjercicioSchema, req.body);
+    res.json(await rutinaPersonalService.actualizarEjercicio(personalDe(req), idParam(req.params.id), idParam(req.params.ejercicioId), datos));
   },
 };
