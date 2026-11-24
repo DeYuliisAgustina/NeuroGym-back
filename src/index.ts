@@ -12,7 +12,8 @@ async function iniciar() {
       `Integraciones → Mercado Pago: ${env.mercadoPago.configurado ? 'API oficial (entorno de PRUEBA)' : 'NO CONFIGURADO'} · ` +
         `WhatsApp: ${{ DIALOG360_SANDBOX: 'real (sandbox de 360dialog)', META_CLOUD_API: 'real (WhatsApp Cloud API de Meta)', SIMULADO: 'SIMULADA' }[env.mensajeria.proveedor]} · ` +
         `IA de rutinas: ${env.ia.proveedor === 'GEMINI' ? `real (Gemini, ${env.ia.geminiModelo})` : 'SIMULADA (sin GEMINI_API_KEY)'} · ` +
-        `Correo: ${env.correo.proveedor === 'GMAIL' ? `real (Gmail, ${env.correo.gmailUsuario})` : 'SIMULADO (los códigos se muestran acá)'}`,
+        `Correo: ${env.correo.proveedor === 'GMAIL' ? `real (Gmail, ${env.correo.gmailUsuario})` : 'SIMULADO (los códigos se muestran acá)'} · ` +
+        `Archivos: ${env.almacenamiento.proveedor === 'VERCEL_BLOB' ? 'Vercel Blob' : `carpeta local (${env.almacenamiento.directorioLocal})`}`,
     );
   });
   if (env.cronHabilitado) programarTareas();

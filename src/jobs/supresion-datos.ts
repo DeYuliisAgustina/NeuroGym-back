@@ -10,11 +10,9 @@
  * mantiene cuotas, pagos y comprobantes durante los plazos legales aplicables.
  */
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import bcrypt from 'bcrypt';
-import { env } from '../config/env';
 import { prisma } from '../config/prisma';
+import { almacenamiento } from '../integrations/almacenamiento/AlmacenamientoObjetos';
 import { registrarAuditoria } from '../services/auditoria.service';
 
 function argumento(nombre: string) {
@@ -48,11 +46,8 @@ export async function suprimirDatosSocio(socioId: number, gimnasioId: number) {
     await registrarAuditoria({ gimnasioId, accion: 'SUPRESION_DATOS_PERSONALES', entidad: 'socio', entidadId: socioId }, tx);
   });
 
-  // Elimina del almacenamiento local los archivos que identificaban al titular.
-  for (const archivo of archivos) {
-    const relativo = archivo.url.split('/archivos/')[1];
-    if (relativo) await fs.rm(path.join(env.almacenamiento.directorioLocal, relativo), { force: true });
-  }
+  // Elimina del almacenamiento de objetos (local o Vercel Blob) los archivos que identificaban al titular.
+  for (const archivo of archivos) await almacenamiento.eliminar(archivo.url);
   return { socioId, archivosEliminados: archivos.length };
 }
 

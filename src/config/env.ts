@@ -125,5 +125,12 @@ export const env = {
   almacenamiento: {
     directorioLocal: process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), 'uploads'),
     maxBytes: Number(process.env.UPLOAD_MAX_BYTES ?? 25 * 1024 * 1024),
+    // Vercel Blob: la clave la carga Vercel al conectar el almacenamiento al proyecto.
+    blobToken: process.env.BLOB_READ_WRITE_TOKEN ?? '',
+    /** Vercel Blob si hay clave (persistente, para la versión publicada); si no, una carpeta local. En las pruebas, siempre local. */
+    get proveedor(): 'VERCEL_BLOB' | 'LOCAL' {
+      if (process.env.NODE_ENV === 'test') return 'LOCAL';
+      return this.blobToken ? 'VERCEL_BLOB' : 'LOCAL';
+    },
   },
 };
